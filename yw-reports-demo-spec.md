@@ -1,6 +1,6 @@
 # YW_reports — Demo Build Spec
 
-**Status:** stage 0 complete (OAuth spike + seed data); architecture pivoted 2026-08-20 to Podio-native review — see [Progress log](#progress-log) at the end
+**Status:** stage 0 complete (OAuth spike + seed data); architecture pivoted 2026-08-20 to Podio-native review; `Suggested Profile Updates` app (app_id `30822495`) provisioned 2026-08-20 — see [Progress log](#progress-log) at the end
 **Goal:** a demonstrable prototype on mock data, used to support funding applications
 **Explicitly out of scope:** real data, production deployment, DPIA, hardware purchase, a local review UI (superseded — see §4)
 
@@ -199,9 +199,11 @@ have been dropped along with the local app.
 
 ## 8. Sandbox
 
-Free Podio tier: 100 items per org, 5 employees. Structure created by hand in the UI — currently one profile and one report.
+Free Podio tier: 100 items per org, 5 employees. Structure created by hand in the UI through stage 0; the `Suggested Profile Updates` app (stage 4) is now created by [setup_podio_app.py](podio%20api%20work/setup_podio_app.py) instead — see the progress log.
 
-Adequate for the whole integration, including two test users in separate workspaces to verify permission filtering actually works. Not adequate for evaluating extraction quality — for that, generate a larger synthetic corpus and test against SQLite directly.
+**Blocked (found 2026-08-20):** user management — adding a second test account to actually verify permission filtering — is not part of the free plan. The originally-planned "two test users in separate workspaces to verify permission filtering actually works" check can't be done in this sandbox without a paid upgrade. Deferred, not resolved — open question, not yet decided whether to pay for a temporary upgrade, skip the check and trust Podio's own permission system (it isn't something this project builds), or defer verification to the real org's paid account later. Revisit before treating the review workflow as demo-complete.
+
+Not adequate for evaluating extraction quality — for that, generate a larger synthetic corpus and test against SQLite directly.
 
 ## 9. Model policy
 
@@ -244,6 +246,7 @@ framework, no DB, credentials from `.env` — see `.env.example`):
 | `reports` app | app_id `30816198` — fields: `title` (text, the report body), `date-of-session` (date), `profile-2` (app/relationship → profile) |
 | `profile` app | app_id `30816226` — fields: `title` (text, name), `date-of-birth` (date) |
 | Damian's profile item | item_id `3352054230` (app_item_id `1` — do not confuse the two, see below) |
+| `Suggested Profile Updates` app | app_id `30822495` — created via `setup_podio_app.py`, fields per spec §5. See [Stage 4 provisioning (2026-08-20)](#stage-4-provisioning-2026-08-20) below. |
 
 **Things the docs got wrong or left ambiguous, resolved by testing against
 the live API rather than guessing:**
@@ -295,5 +298,47 @@ all, superseding the 2026-08-17 in-memory-SQLite-only decision. Sections 4–7 a
 been rewritten accordingly; the old "Sync Podio → SQLite" / "local web UI" / "review
 screen" stages are dropped. (This was originally written up as a separate decision doc,
 `podio-review-app-decision.md`, since folded entirely into this spec.)
+
+### Stage 4 provisioning (2026-08-20)
+
+Repo moved into its own git repo (`demo_report_processing`) today; paths in this doc are
+now relative to that repo root, not the old `podio api work/` folder used in earlier
+entries. `podio-review-app-decision.md` didn't survive the move as a separate file — its
+content was folded entirely into this spec (see the architecture pivot entry above and
+§4–§7) — links to it elsewhere in this doc now point at sections here instead.
+
+Wrote [setup_podio_app.py](podio%20api%20work/setup_podio_app.py) to create the
+`Suggested Profile Updates` app (§5 schema) via `POST /app/` instead of clicking it
+together by hand — the point being that an admin on the real org's Podio account can run
+one command later instead of re-deriving field types and external_ids from this doc.
+Created successfully: **app_id `30822495`**, space `10570017`.
+
+**Write-shape gotchas found, same "verify against live API" approach as stage 0:**
+
+1. **`icon` is required in app config**, undocumented until a 400. Format is `"<id>.png"`;
+   reused `"3.png"` from the existing `reports` app (confirmed via `GET /app/30816198`)
+   since any valid id works and this one is known-good.
+2. **Relationship field `referenced_apps` needs `[{"app_id": ...}]`**, not bare integers
+   — confirmed by testing a throwaway field on the `reports` app (created, verified the
+   shape, then deleted it) before trusting it in the real payload.
+3. **Setting a category field's default value via the API is unsafe.** Including
+   `default_value` in the field-creation POST either 400s (`"missing required
+   properties: ['type']"`) or 500s once a `type` key is added. Worse: setting it
+   *after* creation via `PUT /app/{app_id}/field/{field_id}` doesn't error — it silently
+   corrupts the field. All four `status` options flipped to `"status": "deleted"` and
+   `display` changed from `"list"` to `"inline"`, with a `200` response. Recovered by
+   deleting the app and re-running the script clean rather than trying to patch a patch.
+   The default-value control also wasn't findable in this space's UI (§8 notes the
+   free-plan constraints hit today more generally).
+4. **Decided (2026-08-20): stop trying to make `status` default to `proposed` at the
+   Podio layer at all.** Instead, the extraction script (stage 4's write path) must
+   always set `status: proposed` explicitly on every proposal item it creates. This was
+   already the only safe behavior regardless of whether a field default existed —
+   relying on a default is a footgun the moment it silently changes, or a future write
+   path forgets it's depending on one. `setup_podio_app.py`'s follow-up checklist
+   documents this so it isn't re-attempted.
+
+**Also found today: the "two test users" permission check from §8 is blocked** — adding
+a second account isn't available on this org's free plan. Deferred, see §8.
 
 ### Next: stage 1 — read Podio reports + profiles into transient in-memory objects for one run (no persistence).

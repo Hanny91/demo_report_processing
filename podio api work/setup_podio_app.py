@@ -2,9 +2,8 @@
 One-time provisioning script: creates the 'Suggested Profile Updates' app in
 a Podio space via POST /app/, with every field defined in code — including
 external_ids — instead of clicking it together by hand in the UI. See
-podio-review-app-decision.md for the app's design and podio.md's schema
-table in yw-reports-demo-spec.md §5 for the field list this mirrors.
-
+yw-reports-demo-spec.md §5 for the field list this mirrors and the design
+rationale (originally a separate decision doc, since folded into the spec).
 
 Podio's app-creation endpoint isn't verified against live behavior yet the
 way the OAuth/item endpoints in podio_oauth_spike.py and seed_reports.py
@@ -14,11 +13,19 @@ be confirmed before the extraction script is written against it. Same
 "verify against the live response, don't trust the docs" approach as the
 rest of stage 0.
 
-Does NOT set up: the default value on the `status` category field, app
-sharing/permissions, or the filtered "Needs review" view. Those need
-account-specific choices (who gets access, what the view is called) that
-don't belong hardcoded in a provisioning script — the script prints a
-checklist of them at the end instead.
+Does NOT set up: app sharing/permissions or the filtered "Needs review"
+view. Those need account-specific choices (who gets access, what the view
+is called) that don't belong hardcoded in a provisioning script.
+
+Does NOT set the `status` field's default value to 'proposed' either, but
+for a different reason: that's not achievable through the UI on this space
+either (the default-value control wasn't findable there), and scripting it
+via the API actively corrupts the field (see print_followup_checklist()).
+Decided (2026-08-20) not to keep chasing this: the extraction script that
+creates proposal items (stage 4) must always set `status: proposed` itself,
+explicitly, on every write. That was already the only safe behavior anyway —
+depending on a field default is a footgun the moment the default silently
+changes or a write path forgets it's relying on one.
 
 Usage:
     python setup_podio_app.py                # create the app + fields
@@ -180,25 +187,23 @@ def print_field_summary(app_json: dict) -> None:
 def print_followup_checklist(app_id: int) -> None:
     print(
         f"""
-=== Manual follow-up (not scripted — needs account-specific decisions) ===
+=== Manual follow-up ===
 
-1. Set the default value on the 'Status' field to 'proposed', so new items
-   land in the review queue without the script having to set it explicitly
-   every time. App -> Settings -> Fields -> Status -> edit -> default value.
 
-2. Grant access: Space -> Settings -> Sharing (or this app's own Rights
+
+1. Grant access: Space -> Settings -> Sharing (or this app's own Rights
    panel, if the space restricts per-app). Coordinators need write access
    for the extraction script's own account; instructors need at least
    read/write on this app to review and change 'status' -- they don't need
    any new access to the Daily Report or Child Profile apps beyond what
    they already have.
 
-3. Create the review queue: App -> Views -> + Create view. Filter
+2. Create the review queue: App -> Views -> + Create view. Filter
    status = proposed, group by child, sort by evidence-count descending.
    Name it something like "Needs review" and set it as the app's default
    view -- this is the entire review UI, nothing else to build.
 
-4. Sanity-check the field shapes before pointing the extraction script at
+3. Sanity-check the field shapes before pointing the extraction script at
    this app: create one test item by hand (App id: {app_id}), fetch it via
    GET /item/{{item_id}}, and confirm the category/relationship field value
    shapes match what the script expects to write -- same "don't guess"
