@@ -12,7 +12,7 @@ Youth workers in an outdoor education alternative provision setting write a dail
 
 The reports contain a lot of useful observation that is effectively write-only — nobody has time to read back through a term's worth. This tool reads the reports and proposes updates to the structured profile fields, with every proposal traceable to the exact sentence it came from. A worker reviews and decides.
 
-**Podio remains the system of record — and now also the review surface.** The local machine hosts no database, no review UI, and no persisted content of any kind. It runs a stateless script that reads reports from Podio, extracts candidate profile updates with a local LLM, and writes proposals into a new Podio app (`Suggested Profile Updates`). Instructors review and action proposals inside Podio itself, under their own login. See the [design decision doc](podio-review-app-decision.md) for the full rationale — this was a deliberate pivot away from an earlier local-web-app design.
+**Podio remains the system of record — and now also the review surface.** The local machine hosts no database, no review UI, and no persisted content of any kind. It runs a stateless script that reads reports from Podio, extracts candidate profile updates with a local LLM, and writes proposals into a new Podio app (`Suggested Profile Updates`). Instructors review and action proposals inside Podio itself, under their own login. Full rationale in [§4 Architecture](#4-architecture) below — this was a deliberate pivot away from an earlier local-web-app design.
 
 ## 2. Non-negotiable constraints
 
@@ -39,11 +39,10 @@ Small, and this shapes the architecture:
 
 **Superseded (2026-08-20):** the local web app / in-memory SQLite / local review screen
 design below the line was the plan through stage 0. It has been replaced by the
-Podio-native review design in [podio-review-app-decision.md](podio-review-app-decision.md),
-which this section now reflects. Rationale for the pivot: a local review UI is one more
-surface to secure and demo, when Podio already provides auth, permissions, a UI, and
-revision-history attribution for free — the local machine doesn't need to be more than a
-stateless script.
+Podio-native review design this section now describes. Rationale for the pivot: a local
+review UI is one more surface to secure and demo, when Podio already provides auth,
+permissions, a UI, and revision-history attribution for free — the local machine doesn't
+need to be more than a stateless script.
 
 ```
 Podio (system of record AND review surface)
@@ -106,7 +105,19 @@ Updates`, additive only (no existing report or profile app/field is modified):
 
 - `title` — text — set by the script, e.g. "Damian — presentation — 2026-08-20"
 - `child` — relationship → Child Profile app
-- `target-field` — category, single-select — which profile field this proposes a value for. Closed list: `presentation`, `boundaries`, `triggers`, `projects-and-activities` — the four profile fields currently in scope for suggestions (see decision doc for why boundaries/triggers are included despite reading as safeguarding-adjacent: they're descriptive handover guidance from routine reports, not incident/risk-register data)
+- `target-field` — category, single-select — which profile field this proposes a value for. Closed list: `presentation`, `boundaries`, `triggers`, `projects-and-activities`.
+
+  **Scope rationale (revisited 2026-08-20):** `boundaries` and `triggers` were initially
+  flagged against the general rule that safeguarding/risk fields should never be valid
+  suggestion targets, since those names read as risk-adjacent. Clarified: as fields on
+  this profile, they are descriptive handover guidance for whoever next works with the
+  child (e.g. "gets overwhelmed by loud groups, needs a 5-minute warning before
+  transitions") extracted from ordinary session reports — not a clinical or formal risk
+  assessment. They're in scope. **The exclusion rule still stands** for anything that *is*
+  a dedicated incident report, safeguarding log, or formal risk-register field, should
+  such a thing exist on this or a future profile app — the distinction is "ordinary
+  profile field populated from routine observation" vs. "record of an incident or formal
+  risk decision," not the field's name alone.
 - `proposed-value` — text (multi-line)
 - `source-reports` — relationship → Daily Report app, **multiple**, required — every report this proposal is aggregated from
 - `evidence-count` — number — e.g. "9 of 45 sessions"
@@ -120,12 +131,47 @@ human-in-the-loop — there's no separate `reviews` table to hold that. The delt
 `proposed-value` and the instructor's edited value (visible via Podio's own item revision
 history) is the signal for improving prompts.
 
-**Review workflow (approve/reject) and applying to the profile:** no custom UI — the
-instructor works from a saved Podio view filtered to `status = proposed`, grouped by
-child, and approves/rejects by changing the `status` category field on the item itself
-(edit `proposed-value` first for an "accept with changes" → `edited`). Applying an
-accepted/edited proposal to the real `Child Profile` field is a separate manual copy step
-for the demo, not automated. Full detail in the [decision doc](podio-review-app-decision.md#review-workflow-approvereject-inside-podio).
+### Review workflow (approve/reject) inside Podio
+
+No custom UI is built for this — the review surface is the standard Podio item view plus
+one filtered app view. Concretely:
+
+- **Queue:** a saved Podio view on `Suggested Profile Updates`, filtered to `status =
+  proposed`, grouped by `child`. This is the instructor's worklist — opening the app to
+  this view is the entire "inbox."
+- **Reviewing one item:** the instructor opens a proposal, reads `proposed-value` beside
+  `source-reports` (Podio renders the linked report items inline, so the source text is
+  one click away), and:
+  - **Accept as-is** → change `status` to `accepted`, set `reviewed-by` (self) and
+    `reviewed-at` (today). No edit to `proposed-value`.
+  - **Accept with changes** → edit `proposed-value` directly, then set `status` to
+    `edited`, `reviewed-by`, `reviewed-at`. The original model output is still visible in
+    Podio's own field-level revision history, so the accepted-vs-proposed delta is never
+    lost.
+  - **Reject** → change `status` to `rejected`, set `reviewed-by`, `reviewed-at`. No
+    profile write follows.
+- **No approve/reject buttons are needed or built** — a category field change *is* the
+  approval action, and it's what Podio timestamps and attributes under the instructor's
+  own login. This is the same mechanism the top-level design already relies on for
+  attribution; the review workflow doesn't add anything new, it just names the states.
+
+### Applying an accepted proposal to the profile
+
+Deliberately **not automated for the demo** — this is the one place a wrong write would
+land on the actual `Child Profile` app, so it stays a manual, explicit, human action:
+
+- Coordinator (or the reviewing instructor) opens the `accepted`/`edited` proposal
+  alongside the child's profile item and copies `proposed-value` into the real field by
+  hand.
+- Optionally mark the proposal `status` as done via a value like `applied` later if that
+  distinction turns out to matter — not added to the closed list above unless a real need
+  shows up, to avoid inventing states nobody asked for.
+- **Later automation option (not built for demo):** a Podio Workflow Automation
+  ("Workflows" in the Podio UI) triggered on `status → accepted/edited` that writes
+  `proposed-value` into the matching `Child Profile` field via the relationship in
+  `child`. Worth revisiting once the field mapping (`target-field` value → actual Child
+  Profile field) is stable and trusted — premature to build against four fields' worth of
+  demo data.
 
 ## 6. Podio integration notes
 
@@ -175,8 +221,7 @@ Keep the model swappable by configuration so the difference between model sizes 
 
 Note: the local-app assumptions stage 0 was built under (a persisted or in-memory local
 cache feeding a local review UI) were superseded by the pivot documented below in
-[Architecture pivot (2026-08-20)](#architecture-pivot-2026-08-20) — see
-[podio-review-app-decision.md](podio-review-app-decision.md). Stage 0's OAuth/seed-data
+[Architecture pivot (2026-08-20)](#architecture-pivot-2026-08-20). Stage 0's OAuth/seed-data
 work itself is unaffected and still stands.
 
 Two scripts in this directory, both plain scripts per the constraints (no
@@ -242,13 +287,13 @@ the live API rather than guessing:**
 
 ### Architecture pivot (2026-08-20)
 
-Decided to drop the local web app entirely — see
-[podio-review-app-decision.md](podio-review-app-decision.md) for full rationale. In
-short: review now happens inside Podio itself, via a new `Suggested Profile Updates` app,
-rather than in a local review screen. The local machine runs a stateless script only
-(read from Podio → extract → aggregate per child/field → write proposals to the new app);
-nothing is persisted or cached locally at all, superseding the 2026-08-17
-in-memory-SQLite-only decision. Sections 4–7 above have been rewritten accordingly; the
-old "Sync Podio → SQLite" / "local web UI" / "review screen" stages are dropped.
+Decided to drop the local web app entirely. Review now happens inside Podio itself, via a
+new `Suggested Profile Updates` app, rather than in a local review screen. The local
+machine runs a stateless script only (read from Podio → extract → aggregate per
+child/field → write proposals to the new app); nothing is persisted or cached locally at
+all, superseding the 2026-08-17 in-memory-SQLite-only decision. Sections 4–7 above have
+been rewritten accordingly; the old "Sync Podio → SQLite" / "local web UI" / "review
+screen" stages are dropped. (This was originally written up as a separate decision doc,
+`podio-review-app-decision.md`, since folded entirely into this spec.)
 
 ### Next: stage 1 — read Podio reports + profiles into transient in-memory objects for one run (no persistence).
