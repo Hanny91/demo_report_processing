@@ -5,12 +5,6 @@ external_ids — instead of clicking it together by hand in the UI. See
 podio-review-app-decision.md for the app's design and podio.md's schema
 table in yw-reports-demo-spec.md §5 for the field list this mirrors.
 
-Meant to be run twice, by two different people: once now, by us, against the
-sandbox space, to prove the schema round-trips correctly; and once later, by
-an admin on the real organisation's Podio account, against their own space,
-when this moves out of demo. That's the whole point of scripting it instead
-of building it by hand a second time — the admin runs one command instead of
-re-deriving field types and external_ids from a written spec.
 
 Podio's app-creation endpoint isn't verified against live behavior yet the
 way the OAuth/item endpoints in podio_oauth_spike.py and seed_reports.py
@@ -61,6 +55,7 @@ def build_app_payload(profile_app_id: str, report_app_id: str) -> dict:
                 "app's own extraction script."
             ),
             "external_id": "suggested_profile_updates",
+            "icon": "3.png",
         },
         "fields": [
             {
@@ -68,7 +63,10 @@ def build_app_payload(profile_app_id: str, report_app_id: str) -> dict:
                 "config": {
                     "label": "Child",
                     "external_id": "child",
-                    "settings": {"referenced_apps": [int(profile_app_id)], "multiple": False},
+                    "settings": {
+                        "referenced_apps": [{"app_id": int(profile_app_id)}],
+                        "multiple": False,
+                    },
                 },
             },
             {
@@ -96,7 +94,10 @@ def build_app_payload(profile_app_id: str, report_app_id: str) -> dict:
                 "config": {
                     "label": "Source reports",
                     "external_id": "source-reports",
-                    "settings": {"referenced_apps": [int(report_app_id)], "multiple": True},
+                    "settings": {
+                        "referenced_apps": [{"app_id": int(report_app_id)}],
+                        "multiple": True,
+                    },
                 },
             },
             {
