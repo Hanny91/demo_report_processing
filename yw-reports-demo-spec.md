@@ -2,7 +2,7 @@
 
 **Status:** stage 0 complete (OAuth spike + seed data); architecture pivoted 2026-08-20 to Podio-native review; `Suggested Profile Updates` app (app_id `30822495`) provisioned 2026-08-20; decisions addendum folded in 2026-09-18 — see [Progress log](#progress-log) at the end
 **Goal:** a demonstrable prototype on mock data, used to support funding applications
-**Explicitly out of scope:** real data, production deployment, DPIA, hardware purchase, a local review UI (superseded — see §5), grammar/spelling assistance, and any post-processing of what an instructor writes (see §1)
+**Explicitly out of scope:** real data, production deployment, DPIA, hardware purchase, a local review UI, grammar/spelling assistance, and any post-processing of what an instructor writes (see §1)
 
 ---
 
@@ -12,17 +12,15 @@ Youth workers in an outdoor education alternative provision setting write a dail
 
 The reports contain a lot of useful observation that is effectively write-only — nobody has time to read back through a term's worth. This tool reads the reports and proposes updates to the structured profile fields, with every proposal traceable to the exact sentence it came from. A worker reviews and decides.
 
-**Podio remains the system of record — and now also the review surface.** The local machine hosts no database, no review UI, and no persisted content of any kind. It runs a stateless script that reads reports from Podio, extracts candidate profile updates with a local LLM, and writes proposals into a new Podio app (`Suggested Profile Updates`). Instructors review and action proposals inside Podio itself, under their own login. Full rationale in [§5 Architecture](#5-architecture) below — this was a deliberate pivot away from an earlier local-web-app design.
+**Podio remains the system of record — and the review surface.** The local machine hosts no database, no review UI, and no persisted content of any kind. It runs a stateless script that reads reports from Podio, extracts candidate profile updates with a local LLM, and writes proposals into a new Podio app (`Suggested Profile Updates`). Instructors review and action proposals inside Podio itself, under their own login. Full rationale in [§5 Architecture](#5-architecture) below.
 
 ### Product framing: reduce writing burden
 
 The primary value of profile suggestions is **removing the blank page, not analysis**.
-Instructors already hold the knowledge; the cost is writing it up on top of the daily
-reports themselves. The tool drafts, the instructor edits.
+The tool drafts, the instructor edits.
 
 This does not mean removing writing from the review step. Prompted editing *is* the point
-— it is substantially more manageable than composition, and it keeps the entry the
-instructor's own.
+— it is substantially more manageable than composition, and it keeps the entry the instructor's own.
 
 **Design target: drafts that are easy to change, not easy to accept.**
 
@@ -34,8 +32,7 @@ instructor's own.
 ### Where the value is highest
 
 The tool helps most with **new arrivals, patchy attendance, and young people seen by
-rotating instructors**. For a long-standing young person with a consistent worker, a human
-already holds a better picture than any extraction will produce.
+rotating instructors**.
 
 Use this as the demo test: does the output tell an instructor something they did not
 already know? A "no" on a well-known young person is an acceptable result, not a defect to
@@ -46,7 +43,7 @@ engineer away.
 These are design constraints, not preferences. They exist because the production version handles safeguarding records about vulnerable young people.
 
 1. **All processing local.** No report text is sent to any external API. The language model runs on the machine. Embeddings, if used at all, run locally.
-2. **Never auto-write.** The model only ever proposes, into the `Suggested Profile Updates` app. A human accepts, edits or rejects *inside Podio*, under their own login — that action, not the script's write, is what Podio's revision history attributes to them. The script itself writes as the coordinator running the batch, and only ever to the new app, never to `Daily Report` or `Child Profile` directly.
+2. **Never auto-write.** The model only ever proposes, into the `Suggested Profile Updates` app. A human accepts, edits or rejects *inside Podio*, under their own login — that action, not the script's write, is what Podio's revision history attributes to them. The script itself writes as the coordinator running the batch, and only ever to the new app, never to `Child Profile` directly.
 3. **Every proposal cites its source.** A proposal with no verifiable source sentence is discarded, not shown. This is enforced structurally: `source-reports` is a non-null relationship field, and (during extraction) the source reference is a non-null foreign key before it's ever aggregated into a proposal.
 4. **No permission escalation.** A worker must never see, via this tool, anything they could not see in Podio directly. Review happening inside Podio itself makes this constraint largely self-enforcing rather than something the app must separately guarantee.
 
@@ -77,18 +74,15 @@ Mitigations, each of which appears as a concrete requirement elsewhere in this s
 Small, and this shapes the architecture:
 
 - ~45 sessions per young person per year
-- ~8–10 young people in scope
-- so ~400 reports/year, a few thousand over the life of the system
+- only one profile analysed at a time
 
-**Consequences:** no vector database, no approximate nearest neighbour index, no incremental sync logic. SQLite throughout. A full rebuild from Podio takes minutes, so rebuild rather than reconcile.
+**Consequences:** no vector database, no approximate nearest neighbour index, no incremental sync logic. Data lives in transient in-memory objects, rebuilt from Podio on each run. A full rebuild from Podio takes minutes, so rebuild rather than reconcile.
 
 ## 5. Architecture
 
-**Superseded (2026-08-20):** the local web app / in-memory SQLite / local review screen
-design below the line was the plan through stage 0. It has been replaced by the
-Podio-native review design this section now describes. Rationale for the pivot: a local
-review UI is one more surface to secure and demo, when Podio already provides auth,
-permissions, a UI, and revision-history attribution for free — the local machine doesn't
+Review happens inside Podio, not in anything built for this project. Podio already
+provides auth, permissions, a UI, and revision-history attribution; a local review UI
+would be one more surface to secure and demo for no gain. So the local machine doesn't
 need to be more than a stateless script.
 
 ```
@@ -98,9 +92,8 @@ Podio (system of record AND review surface)
 Stateless script — transient Python objects for the duration of one run, nothing
 persisted, nothing cached between runs
   │
-  ├─ extraction: per-report, one model call each
-  ├─ aggregation: per (child, target-field), across that child's full report history —
-  │  not one item per extracted sentence (see "Aggregation, not per-sentence proposals")
+  ├─ extraction: per (report, target field), one model call each
+  ├─ aggregation: per (child, target-field), across that child's full report history
   ▼
 Podio — writes proposals into the new "Suggested Profile Updates" app only
   │
@@ -113,28 +106,30 @@ Applying an accepted proposal to the real profile field is a separate, explicit 
 (manual, or a later automation) — not done automatically by this script
 ```
 
-**No local persistence, full stop** — this supersedes the 2026-08-17 in-memory-SQLite
-decision, not just the on-disk question it was weighing. No SQLite file, no in-memory DB
-kept alive between runs, nothing cached locally between runs at all: re-run against Podio
-each time, or track processed-report IDs *in Podio* (not locally) if avoiding
-recomputation matters later. Never log field values or report text — IDs only, if
-logging at all.
+**No local persistence, full stop.** No SQLite file, no in-memory DB kept alive between
+runs, nothing cached locally between runs at all: re-run against Podio each time, or
+track processed-report IDs *in Podio* (not locally) if avoiding recomputation matters
+later. Never log field values or report text — IDs only, if logging at all.
 
-Batching is per child, ahead of that child's review meeting, not an org-wide sweep on a
+The single exception is the development-only response cache in the eval harness (§13):
+mock data only, off by default, and it cannot be enabled from `run.py`. It never touches
+anything read from Podio.
+
+Batching is per child, ahead of that child's review meeting, an instructor's supervision or someone providing cover on a short notice, not an org-wide sweep on a
 schedule — confirm actual review cadence with coordinators before hardcoding a trigger.
 
 ### Extraction-first, not retrieval
 
 A year of one child's reports is ~20–40k tokens. There is nothing to retrieve from. Instead of semantic search, map over reports individually:
 
-- Each report is processed once, on import, and the result cached.
-- Each extraction is therefore derived from exactly one report — provenance is structural rather than reconstructed.
+- Each (report, target field) pair gets exactly one model call per run — one field per call, never several fields in one pass (§13).
+- Each extraction derives from exactly one report, so provenance is structural rather than reconstructed.
 - Small local models perform far better on one short report than on 45 concatenated ones.
-- New report arrives → one call → done. Updating a profile is instant because the work already happened.
+- Per-report extraction is cheap and independent, so a child's reports can be processed in parallel.
 
 Cross-cohort questions ("which young people have shown X this term?") are out of scope for
-this script — Podio's own filtering/reporting on `Suggested Profile Updates` is the query
-surface now that there's no local cache to run SQL against.
+this script. Podio's own filtering and reporting on `Suggested Profile Updates` is the
+query surface for them.
 
 ### Quote verification
 
@@ -175,9 +170,8 @@ Two rules the write path must enforce, both about not trampling the review proce
 
 ## 6. Data model (sketch)
 
-There is no local data model anymore — no `reports`, `profiles`, `extractions`, or
-`reviews` tables. The only persisted state is the new Podio app, `Suggested Profile
-Updates`, additive only (no existing report or profile app/field is modified):
+There is no local data model. The only persisted state is the Podio app `Suggested
+Profile Updates`, additive only (no existing report or profile app/field is modified):
 
 - `title` — text — set by the script, e.g. "Damian — presentation — 2026-08-20"
 - `child` — relationship → Child Profile app
@@ -206,7 +200,7 @@ Updates`, additive only (no existing report or profile app/field is modified):
 - `prompt-version` — text — sits alongside `model-version`. Prompts change far more often than models; without both, a change in accuracy can't be attributed to either.
 
 `status` and `reviewed-by`, changed by the instructor inside Podio, are the evidence of
-human-in-the-loop — there's no separate `reviews` table to hold that. The delta between
+human-in-the-loop, recorded on the proposal item itself. The delta between
 `proposed-value` and `final-value` is the signal for improving prompts, and accumulated
 over time it is also the only dataset that could make fine-tuning viable if that is ever
 wanted (§12). Structure it properly now; decide about it later.
@@ -313,15 +307,15 @@ What does bind:
 | Stage | Deliverable | Notes |
 |---|---|---|
 | 0 | ✅ OAuth spike — authenticate, pull one report and its linked profile | Done — `podio_oauth_spike.py`. See progress log. |
-| 1 | Sync/read Podio reports + profiles into transient in-memory objects for one run | No persistence — replaces the old "Sync Podio → SQLite" stage |
-| 2 | Per-report extraction with quote verification | Local model, swappable by config |
+| 1 | Sync/read Podio reports + profiles into transient in-memory objects for one run | No persistence; rebuilt from Podio every run (§5) |
+| 2 | Per-report extraction with quote verification | Local model, swappable by config. One call per (report, field) (§13) |
 | 3 | Aggregation per (child, target-field) across a child's report history | |
 | 4 | Create `Suggested Profile Updates` app in Podio (schema in §6); write aggregated proposals | Additive only — never touches Daily Report or Child Profile apps. Sets `status: proposed` explicitly and obeys the batch run safety rules in §5 |
-| 5 | Instructor review happens natively in Podio | No local review screen to build — this is the point of the pivot |
+| 5 | Instructor review happens natively in Podio | Nothing to build — review uses the standard Podio item view plus a filtered app view (§6) |
 
 Stages 2–4 are the demo. Stage 5 requires no build at all, which is itself the thing being
-demonstrated. Superseded stages ("browse reports in a local web UI", "review screen")
-have been dropped along with the local app.
+demonstrated. The module-level build order for stages 2–4 is in [§13](#13-code-architecture);
+it starts on mock data, ahead of the stage 1 Podio read path.
 
 ## 9. Sandbox
 
@@ -329,13 +323,13 @@ Free Podio tier: 100 items per org, 5 employees — a *sandbox* limit, not a des
 
 **Blocked (found 2026-08-20):** user management — adding a second test account to actually verify permission filtering — is not part of the free plan. The originally-planned "two test users in separate workspaces to verify permission filtering actually works" check can't be done in this sandbox without a paid upgrade. Deferred, not resolved — open question, not yet decided whether to pay for a temporary upgrade, skip the check and trust Podio's own permission system (it isn't something this project builds), or defer verification to the real org's paid account later. Revisit before treating the review workflow as demo-complete.
 
-Not adequate for evaluating extraction quality — for that, generate a larger synthetic corpus and test against SQLite directly.
+Not adequate for evaluating extraction quality — for that, generate a larger synthetic corpus and run it through the offline eval harness (`eval/`, §13), outside the demo script.
 
 ## 10. Model policy
 
 Build against the weakest model that could plausibly be deployed. Extraction logic that works against a frontier model can fail entirely on an 8B, and discovering that after the fact would invalidate the demo.
 
-Keep the model swappable by configuration so the difference between model sizes can be measured — that turns the hardware line in a funding application into an evidence-based ask rather than a guess.
+Keep the model swappable by configuration so the difference between model sizes can be measured — that turns the hardware line in a funding application into an evidence-based ask rather than a guess. Every candidate is a local model (§2, constraint 1); the eval harness (§13) is where they are compared.
 
 ## 11. Open questions
 
@@ -355,12 +349,159 @@ Recorded so they are neither re-litigated nor accidentally started:
   accumulates the dataset that would make it viable later — structure it well now, decide
   later.
 - **Evaluation and funding-report tooling.** Sits on the same extraction layer but is
-  aimed at managers rather than instructors. Deliberately second: the profile workflow is
+  aimed at managers rather than instructors. (This is outcome reporting, not the
+  extraction eval harness in §13, which is part of the build.) Deliberately second: the profile workflow is
   what measures extraction accuracy in the first place, and aggregate statistics should not
   be published to funders on unvalidated extractions.
 - **Upstream dictation on the daily reports themselves.** Simpler than this project and
   addresses the writing burden (§1) more directly. Worth raising with coordinators
   separately; not part of this build.
+
+## 13. Code architecture
+
+Module layout and build order for the extraction pipeline (build stages 2–4, §8).
+
+### Organising principle
+
+Exactly one function in the codebase calls a model. Everything else is plain data
+transformation, testable with no network, no GPU and no Podio.
+
+Second principle: no persistence (§5). The process holds Python objects for the duration
+of one run and exits. No SQLite file, no cache between runs, no report text written to
+disk. Logging records IDs only, never field values.
+
+### Layout
+
+```
+yw/
+  config.py         model name, base_url, temperature, prompt_version
+  models.py         dataclasses: Report, Extraction, Proposal
+  podio/
+    client.py       auth, request wrapper, rate limiting
+    schema.py       external_id constants + per-field-type flattening
+    read.py         fetch_reports_for_child(child_id) -> list[Report]
+                    + current profile values and previously rejected values (step 5)
+    write.py        create_proposal(Proposal) -> item_id
+  extract/
+    prompt.py       build_prompt(report, field, examples) -> messages
+    llm.py          complete(messages) -> str        <-- the ONLY model call
+    parse.py        parse_response(raw) -> list[RawExtraction]
+    verify.py       verify_quote(raw, report.text) -> Extraction | None
+  vocabulary.py     approved phrasings, example selection   [LATER — see Deferred]
+  aggregate.py      group by (child, field) -> list[Proposal]
+  run.py            orchestration; the only place with side effects
+eval/
+  cases.yaml        mock reports + expected extractions
+  score.py
+```
+
+`client.py` and `schema.py` carry over what stage 0 established (§7, progress log): JSON
+token exchange, `item_id` vs `app_item_id`, and per-`type` field shapes.
+
+### Step sequence
+
+1. `read.fetch_reports_for_child(child_id)`
+2. For each report, for each target field:
+   - `prompt.build_prompt(report, field, examples)`
+   - `llm.complete(messages)`
+   - `parse.parse_response(raw)`
+   - `verify.verify_quote(raw, report.text)` — discard on failure
+3. Collect surviving extractions.
+4. `aggregate.group(extractions)` → one `Proposal` per (child, target-field).
+5. Filter: drop proposals matching the current profile value, and drop any value
+   previously rejected for that (child, field) (§5, batch run safety rules).
+6. `write.create_proposal(...)` for each survivor, with `status: proposed` set explicitly
+   (§6).
+
+### Small-model adaptations
+
+- **One field per call.** Do not ask a small model to extract triggers, activities and
+  boundaries in one pass. Three narrow questions, three calls. Accuracy improves
+  substantially and each JSON schema stays trivial. Call count rises; local calls cost
+  nothing but time.
+- **Temperature at or near 0.** Set sampling parameters explicitly on every call. Never
+  rely on Ollama defaults, which change between versions and models and will silently
+  invalidate model comparisons.
+- **Parse defensively.** Prompt for JSON and parse tolerantly rather than depending on
+  structured-output support, which varies between models and Ollama versions. One retry
+  on unparseable output, then give up. Do not build an agent loop.
+
+### `verify.py` is the choke point
+
+No exact string match of the quoted sentence into the source report text → the extraction
+is discarded. Not flagged, not lowered in confidence. Discarded.
+
+This is the guarantee the entire provenance design rests on (§2 constraint 3, §5 quote
+verification). It is roughly twenty lines and it is the primary defence against
+fabricated observations. **Write it and its tests first.**
+
+It also yields the character offsets stored with the extraction.
+
+### `llm.py` contract
+
+One signature, forever: messages in, string out.
+
+**Local models only** (§2, constraint 1), everywhere — in `run.py` and in the eval
+harness alike. `llm.py` talks to the OpenAI-compatible interface Ollama exposes
+(`localhost:11434/v1`), so switching models is a `model` change in `config.py`, never a
+refactor. The eval harness loops over local candidates; deployment pins one.
+
+### Eval harness
+
+`eval/cases.yaml` holds 20–30 mock reports with hand-written expected output: report text,
+target field, expected value, expected source sentence.
+
+**Include cases where the correct answer is nothing** — reports with no trigger, no
+boundary event. Small models over-extract, and these cases are what expose it.
+
+`eval/score.py` reports counts, not pass/fail:
+
+- expected extractions found
+- invented extractions (nothing expected, something produced)
+- quote verification failures
+- unparseable responses
+
+**Weight invented extractions heavily.** A missed observation is a small loss; an invented
+one reaching a child's profile is the failure that matters.
+
+Write the cases before tuning prompts, or they will unconsciously encode what the current
+prompt already passes. Expect to grow the file: every surprise in testing becomes a new
+case.
+
+This file is the benchmark. Published leaderboards measure maths and coding, not
+extraction from youth work prose.
+
+**Development-only response cache.** Cache raw model responses keyed by
+(report_id, field, prompt_version, model), so eval re-runs are instant. This is the one
+named exception to §5's no-persistence rule, and it is bounded accordingly: mock data from
+`eval/cases.yaml` only, behind a config flag that is off by default, not enableable from
+`run.py`, and it does not ship.
+
+### Build order
+
+1. `models.py`
+2. `verify.py` + tests
+3. `parse.py`
+4. `llm.py`
+5. `prompt.py`
+6. `eval/` harness
+7. `aggregate.py`
+8. `podio/write.py`
+
+Steps 1–6 need no Podio connection at all and run entirely on mock data. The Podio read
+path (`client.py`, `schema.py`, `read.py`) is build stage 1 (§8) and isn't in this list;
+it is needed before step 8 can run end to end.
+
+### Deferred: `vocabulary.py`
+
+Requires accepted decisions to exist, so it cannot precede the workflow that produces
+them. When built: store approved phrasings per category option, select relevant examples
+by similarity to the report being processed, and feed a handful into the prompt. Mine
+rejections as negative examples too, or the vocabulary entrenches around early mistakes.
+
+Phrasings must be curated by a coordinator and generalised: a raw source sentence about a
+specific child is that child's data. Where the curated phrasings are stored is undecided,
+but §5 rules out a local store; similarity, if it uses embeddings, runs locally (§2).
 
 ## Progress log
 
@@ -520,4 +661,43 @@ document to read. Where it conflicted with what was here, it won. What changed:
 Two new open questions came out of this (§11): which target fields can become category
 fields, and how `review-duration` is actually captured in a Podio-native review.
 
-### Next: stage 1 — read Podio reports + profiles into transient in-memory objects for one run (no persistence).
+### Pivot framing removed from the body (2026-09-18)
+
+Wording-only cleanup. The spec body now describes the Podio-native design directly,
+without presenting it as a replacement for the dropped local-app design; that history is
+kept here in the progress log only. No design decisions or constraints changed. What
+changed:
+
+- **§5** — the "Superseded" opening paragraph is now a statement of why the design is a
+  stateless script (Podio already provides auth, permissions, UI and attribution). The
+  no-local-persistence rule is unchanged, minus the "supersedes 2026-08-17" framing.
+  "Extraction-first" no longer talks about caching results on import: one model call per
+  report per run, cheap and parallel.
+- **§4, §6, §8, front matter** — leftover references to SQLite, the old local tables,
+  superseded stages and "the pivot" removed.
+- **§9** — extraction-quality evaluation now points at a separate offline evaluation
+  harness (storage undecided, see §12) instead of "test against SQLite directly".
+
+### Code architecture folded in (2026-09-18)
+
+A code architecture note (module layout, step sequence, small-model adaptations, eval
+harness, build order) was written separately and has been merged into the body as **§13**,
+the same way as the earlier decision doc and addendum. It was appended rather than
+inserted so existing section numbers don't change. Three points were settled while
+folding it in, where it conflicted with the spec:
+
+- **Local models only, everywhere.** The note let `llm.py` switch between cloud and local
+  endpoints through `base_url`. That would break §2 constraint 1, so it was dropped:
+  cloud endpoints aren't used in `run.py` or in the eval harness. (§10, §13)
+- **One named exception to no-persistence.** The development-only response cache is
+  allowed in the eval harness only: mock data only, off by default, not enableable from
+  `run.py`, not shipped. The §5 rule is otherwise unchanged. This also settles the
+  harness storage question the §9 entry above left open. (§5, §9, §13)
+- **One model call per (report, target field), not per report.** Small models extract
+  more accurately from one narrow question per call. §5's extraction bullets and diagram
+  were updated to match; provenance is still structural. (§5, §8, §13)
+
+Also: §12's deferred "evaluation" is clarified as manager-facing outcome reporting, not
+the extraction eval harness, which is part of the build.
+
+### Next: build order step 1–2 (§13) — `models.py`, then `verify.py` and its tests, on mock data. The stage 1 Podio read path follows before `podio/write.py`.
