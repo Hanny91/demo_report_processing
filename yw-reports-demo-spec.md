@@ -45,7 +45,7 @@ These are design constraints, not preferences. They exist because the production
 1. **All processing local.** No report text is sent to any external API. The language model runs on the machine. Embeddings, if used at all, run locally.
 2. **Never auto-write.** The model only ever proposes, into the `Suggested Profile Updates` app. A human accepts, edits or rejects *inside Podio*, under their own login — that action, not the script's write, is what Podio's revision history attributes to them. The script itself writes as the coordinator running the batch, and only ever to the new app, never to `Child Profile` directly.
 3. **Every proposal cites its source.** A proposal with no verifiable source sentence is discarded, not shown. This is enforced structurally: `source-reports` is a non-null relationship field, and (during extraction) the source reference is a non-null foreign key before it's ever aggregated into a proposal.
-4. **No permission escalation.** A worker must never see, via this tool, anything they could not see in Podio directly. Review happening inside Podio itself makes this constraint largely self-enforcing rather than something the app must separately guarantee.
+4. **No permission escalation.** A worker must never see, via this tool, anything they could not see in Podio directly. Review happening inside Podio itself makes this constraint largely self-enforcing rather than something the app must separately guarantee. The one place report text is *copied* rather than linked is `evidence-quotes` (§6), which Podio's permissions on the source report don't follow. That is acceptable under this organisation's access model: every worker can see every daily report, because anyone may work with any child; only incident records are restricted per user, and those are never extraction sources or targets (§6 exclusion rule). If a deployment restricts daily reports per user, `evidence-quotes` must be revisited.
 
 Constraints 3 and 4 can be relaxed for the demo only in the sense that mock data carries no real risk — but the mechanisms must be built and demonstrable, because they are the point.
 
@@ -135,6 +135,8 @@ query surface for them.
 
 Models paraphrase when asked to quote. The model returns what it believes is the source sentence; the script then string-matches that back into the report text to compute character offsets. **No exact match means the extraction is rejected**, before it's ever eligible for aggregation. This is the primary defence against fabricated observations and it is cheap.
 
+"Exact" allows for typography only: dash variants, curly vs straight quote marks, "…" vs "...", and runs of whitespace count as equal, because a model retyping "—" as "-" hasn't changed what the report says. Case, punctuation and every word must still match; there is no fuzzy matching. The quote that is kept is always sliced from the original report, never the model's version, so the evidence a reviewer sees (`evidence-quotes`, §6) is character-for-character what the instructor wrote.
+
 ### Aggregation, not per-sentence proposals
 
 Do not create one proposal per extracted sentence. Extract per-report, then aggregate across a child's reports before writing anything to Podio: group by target field, and only propose where the aggregated value differs from what's already on the profile. One proposal per (child, target-field) combination, citing every supporting report via `source-reports`. This keeps proposal volume low (roughly 5–15 per child per batch, not hundreds) and keeps each proposal well-evidenced rather than one instructor's single phrasing.
@@ -188,10 +190,11 @@ Profile Updates`, additive only (no existing report or profile app/field is modi
   such a thing exist on this or a future profile app — the distinction is "ordinary
   profile field populated from routine observation" vs. "record of an incident or formal
   risk decision," not the field's name alone.
+- `evidence-count` — number — e.g. "9 of 45 sessions". The first thing the reviewer should read (§3).
 - `proposed-value` — text (multi-line) — **written by the script and never edited by anyone.** Keep it short (§1): two lines that invite an edit, not a paragraph polished enough to wave through.
 - `final-value` — text (multi-line) — the instructor's text, where they changed something. Blank means "same as proposed". Without this field the proposed-versus-final delta is lost and edit quality can't be measured; Podio's field-level revision history does record the change, but it isn't queryable in aggregate, so it is not a substitute.
-- `source-reports` — relationship → Daily Report app, **multiple**, required — every report this proposal is aggregated from. Podio caps this at 250 linked items — a non-issue, see §7.
-- `evidence-count` — number — e.g. "9 of 45 sessions". The first thing the reviewer should read (§3).
+- `evidence-quotes` — text (multi-line) — **written by the script and never edited by anyone.** The verified sentence behind each supporting extraction, one line each, dated: `2026-08-07 — "…"`. Sliced from the report's own text (§5, quote verification), so it is exactly what the instructor wrote. Placed next to `final-value` so the evidence sits beside the edit (§1), and after `evidence-count` so it supports the proposal rather than leading it (§3). Copying report text here is acceptable under constraint 4 (§2).
+- `source-reports` — relationship → Daily Report app, **multiple**, required — every report this proposal is aggregated from, for full context. Podio caps this at 250 linked items — a non-issue, see §7.
 - `status` — category, single-select — `proposed` / `accepted` / `edited` / `rejected`. **Set explicitly to `proposed` by the script on every item it creates, never left blank** — there is no field default, and trying to add one corrupts the field (progress log, stage 4 provisioning).
 - `reviewed-by` — contact
 - `reviewed-at` — date
@@ -215,8 +218,9 @@ one filtered app view. Concretely:
   this view is the entire "inbox." Full proposal history sits underneath it; the filter is
   what keeps the queue clean, never deletion (§7).
 - **Reviewing one item:** the instructor opens a proposal, reads `evidence-count` first,
-  then `proposed-value` beside `source-reports` (Podio renders the linked report items
-  inline, so the source text is one click away), and:
+  then `proposed-value` with the supporting sentences in `evidence-quotes` beside it.
+  `source-reports` is there for the full context (Podio renders the linked report items
+  inline, so each whole report is one click away). Then:
   - **Accept as-is** → change `status` to `accepted`, set `reviewed-by` (self) and
     `reviewed-at` (today). `final-value` stays blank, which is how "unchanged" is
     recorded. Nothing is copied by hand for the common case.
@@ -319,7 +323,7 @@ it starts on mock data, ahead of the stage 1 Podio read path.
 
 ## 9. Sandbox
 
-Free Podio tier: 100 items per org, 5 employees — a *sandbox* limit, not a design one. Paid plans allow unlimited items, so nothing in this design should be shaped by item volume (§7). Structure created by hand in the UI through stage 0; the `Suggested Profile Updates` app (stage 4) is now created by [setup_podio_app.py](podio%20api%20work/setup_podio_app.py) instead — see the progress log.
+Free Podio tier: 100 items per org, 5 employees — a *sandbox* limit, not a design one. Paid plans allow unlimited items, so nothing in this design should be shaped by item volume (§7). Structure created by hand in the UI through stage 0; the `Suggested Profile Updates` app (stage 4) is now created by [setup_podio_app.py](podio_api_work/setup_podio_app.py) instead — see the progress log.
 
 **Blocked (found 2026-08-20):** user management — adding a second test account to actually verify permission filtering — is not part of the free plan. The originally-planned "two test users in separate workspaces to verify permission filtering actually works" check can't be done in this sandbox without a paid upgrade. Deferred, not resolved — open question, not yet decided whether to pay for a temporary upgrade, skip the check and trust Podio's own permission system (it isn't something this project builds), or defer verification to the real org's paid account later. Revisit before treating the review workflow as demo-complete.
 
@@ -429,7 +433,8 @@ token exchange, `item_id` vs `app_item_id`, and per-`type` field shapes.
 ### `verify.py` is the choke point
 
 No exact string match of the quoted sentence into the source report text → the extraction
-is discarded. Not flagged, not lowered in confidence. Discarded.
+is discarded. Not flagged, not lowered in confidence. Discarded. Only typography is
+forgiven (§5, quote verification); the kept quote is the report's own text.
 
 This is the guarantee the entire provenance design rests on (§2 constraint 3, §5 quote
 verification). It is roughly twenty lines and it is the primary defence against
@@ -593,7 +598,7 @@ entries. `podio-review-app-decision.md` didn't survive the move as a separate fi
 content was folded entirely into this spec (see the architecture pivot entry above and
 §5–§8) — links to it elsewhere in this doc now point at sections here instead.
 
-Wrote [setup_podio_app.py](podio%20api%20work/setup_podio_app.py) to create the
+Wrote [setup_podio_app.py](podio_api_work/setup_podio_app.py) to create the
 `Suggested Profile Updates` app (§6 schema) via `POST /app/` instead of clicking it
 together by hand — the point being that an admin on the real org's Podio account can run
 one command later instead of re-deriving field types and external_ids from this doc.
@@ -700,4 +705,28 @@ folding it in, where it conflicted with the spec:
 Also: §12's deferred "evaluation" is clarified as manager-facing outcome reporting, not
 the extraction eval harness, which is part of the build.
 
-### Next: build order step 1–2 (§13) — `models.py`, then `verify.py` and its tests, on mock data. The stage 1 Podio read path follows before `podio/write.py`.
+### Build steps 1–3 and evidence quotes (2026-09-18)
+
+`yw/models.py`, `yw/extract/verify.py` and `yw/extract/parse.py` written, with tests
+(`tests/`, run with `python -m pytest`). Two decisions came out of it:
+
+- **Quote verification forgives typography, nothing else.** Most seed reports use em
+  dashes, and a model retyping "—" as "-" was losing correct extractions for no gain.
+  Dashes, curly/straight quote marks, ellipses and whitespace now count as equal; case,
+  punctuation and wording still must match exactly. The kept quote is always the report's
+  own text. (§5, §13)
+- **Proposals now show the quotes, not just links.** Verified quotes were being dropped at
+  aggregation, so a reviewer had only `source-reports` and had to reread whole reports to
+  find the supporting sentence, despite §1 promising every proposal is traceable to "the
+  exact sentence it came from". New field `evidence-quotes` (§6). Copying report text is
+  acceptable because every worker can already see every daily report; only incident
+  records are restricted per user, and those are never sources (§2 constraint 4).
+
+While adding the field, `setup_podio_app.py` turned out to still have the pre-addendum
+schema: `final-value`, `review-duration` and `prompt-version` were missing, so app
+`30822495` lacked them too. The script now creates all 13 §6 fields, ordered for the
+§3 reading order (evidence count before the proposed value, quotes next to the edit
+field). App `30822495` is to be deleted and recreated from the script; the app_id in the
+status line and sandbox table must be updated once that's done.
+
+### Next: build order step 4 (§13) — `llm.py`, local models via Ollama only. Then `prompt.py`, which must ask for the reply format documented in `parse.py`.
