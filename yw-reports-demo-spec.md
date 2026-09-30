@@ -111,9 +111,15 @@ runs, nothing cached locally between runs at all: re-run against Podio each time
 track processed-report IDs *in Podio* (not locally) if avoiding recomputation matters
 later. Never log field values or report text — IDs only, if logging at all.
 
-The single exception is the development-only response cache in the eval harness (§13):
-mock data only, off by default, and it cannot be enabled from `run.py`. It never touches
-anything read from Podio.
+There are two exceptions, both for development only:
+
+- The response cache in the eval harness (§13): mock data only, off by default, and it
+  cannot be enabled from `run.py`. It never touches anything read from Podio.
+- **Sandbox only:** `run.py --save` writes a run's proposals, including their verified
+  quotes, to `runs/` (gitignored), so a long extraction run isn't lost to a failed
+  upload (progress log, 2026-09-30). It is off by default and holds report text, so it
+  must never be used against real data. Remove it, or take it out of scope, before
+  anything here touches a real org.
 
 Batching is per child, ahead of that child's review meeting, an instructor's supervision or someone providing cover on a short notice, not an org-wide sweep on a
 schedule — confirm actual review cadence with coordinators before hardcoding a trigger.
@@ -401,7 +407,9 @@ eval/
 ```
 
 `client.py` and `schema.py` carry over what stage 0 established (§7, progress log): JSON
-token exchange, `item_id` vs `app_item_id`, and per-`type` field shapes.
+token exchange, `item_id` vs `app_item_id`, and per-`type` field shapes. For the MVP,
+`schema.py` is folded into `read.py` (field readers) and `write.py` (external_ids): each
+has one user. Split it out once a second module reads the same field types.
 
 ### Step sequence
 
@@ -754,4 +762,40 @@ and the eval harness (steps 4–6) were done earlier the same day. Decisions:
   the one child in the run, key the result by target field only, and hold it in memory
   for that run, like the profile values (§5, no local persistence).
 
-### Next: build order step 8 (§13) — `podio/write.py`. It needs the stage 1 read path (`client.py`, `schema.py`, `read.py`) before it can run end to end.
+### Stage 1 read path, `write.py` and `run.py` (2026-09-30)
+
+`yw/podio/client.py`, `read.py` and `write.py` and `yw/run.py` written, with tests.
+Standard library only, like `llm.py`; `httpx` and `python-dotenv` are left to the
+`podio_api_work/` scripts. MVP scope as agreed: no rate limiting, no retries, no paging,
+no parallel model calls, no `schema.py` (§13 layout note).
+
+**Verified against the live API** (same approach as the stage 0 and stage 4 lists):
+
+1. **`POST /item/app/{app_id}/filter/` filters on a relationship field by external_id:**
+   `{"filters": {"profile-2": [child_item_id]}}`. `read.py` also checks every returned
+   report links to the child, so an ignored filter would stop the run rather than mix
+   children.
+2. **The filter response includes every item's full fields**, so one call per child
+   reads all their reports. The §7 `/reference/` route would need another call per
+   report.
+
+**Not yet verified, to check on the first `--write`:**
+
+- Category fields written as option ids (looked up from `GET /app/{app_id}` by option
+  text, so nothing hard-codes ids that change when the app is recreated).
+- Large text fields take HTML: `evidence-quotes` is one `<p>` per quote, escaped.
+
+**Decisions:**
+
+- `run.py` is a dry run unless given `--write`. With `--write`, it checks the proposals
+  app has every field and option it writes *before* the model runs, so an app that
+  wasn't recreated fails in seconds rather than after an hour.
+- `--save` added as a sandbox-only exception to §5 (see there). `--from-saved FILE
+  --write` uploads a saved run without model calls, and each created `item_id` is
+  written back to the file so a re-upload after a failure skips those.
+- Titles read `<field> — <n> of <m> sessions — <run date>`. `evidence-count` is a number
+  field, so the "of m" lives in the title. The child's name is left out: the `child`
+  relationship shows it, and fetching it costs a call.
+- New env var `PODIO_PROPOSALS_APP_ID` (`.env.example`).
+
+### Next: first end-to-end run for Damian — `python -m yw.run --child 3352054230 --save --write`. Then check the created items in Podio against the unverified points above.
