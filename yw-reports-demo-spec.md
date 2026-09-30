@@ -168,7 +168,8 @@ Two rules the write path must enforce, both about not trampling the review proce
 2. **Never re-propose a previously rejected value.** Repeating the same rejected
    suggestion each term is the fastest way to make reviewers stop reading. Track rejected
    values per (child, target-field) — read them back out of the proposals app at the start
-   of a run, since there's no local state to hold them.
+   of a run, since there's no local state to hold them. **Deferred for the MVP** (progress
+   log, 2026-09-30): this costs an extra Podio query per run and isn't built yet.
 
 ## 6. Data model (sketch)
 
@@ -412,8 +413,9 @@ token exchange, `item_id` vs `app_item_id`, and per-`type` field shapes.
    - `verify.verify_quote(raw, report.text)` — discard on failure
 3. Collect surviving extractions.
 4. `aggregate.group(extractions)` → one `Proposal` per (child, target-field).
-5. Filter: drop proposals matching the current profile value, and drop any value
-   previously rejected for that (child, field) (§5, batch run safety rules).
+5. Filter: drop proposals matching the current profile value (`aggregate.drop_current`),
+   and drop any value previously rejected for that (child, field) (§5, batch run safety
+   rules — the rejected-value part is deferred for the MVP, see progress log 2026-09-30).
 6. `write.create_proposal(...)` for each survivor, with `status: proposed` set explicitly
    (§6).
 
@@ -728,4 +730,28 @@ schema: `final-value`, `review-duration` and `prompt-version` were missing, so a
 field). App `30822495` is to be deleted and recreated from the script; the app_id in the
 status line and sandbox table must be updated once that's done.
 
-### Next: build order step 4 (§13) — `llm.py`, local models via Ollama only. Then `prompt.py`, which must ask for the reply format documented in `parse.py`.
+### Build step 7: `aggregate.py` (2026-09-30)
+
+`yw/aggregate.py` written, with tests (`tests/test_aggregate.py`). `llm.py`, `prompt.py`
+and the eval harness (steps 4–6) were done earlier the same day. Decisions:
+
+- **No model call in aggregation.** The proposed value is built from the extracted
+  values: values that differ only in case, whitespace or trailing punctuation count as
+  one phrase, phrases are ranked by supporting sessions then recency, and the top 3 are
+  joined. Every phrase in a draft is therefore a model-extracted value backed by a
+  verified quote (§2 constraint 3), in the reports' own wording (§5 voice). A
+  model-written summary would add text no quote supports. Known weakness: free-text
+  values rarely repeat word for word, so ranking mostly falls back to recency. That is
+  the §3 case for category fields.
+- **Evidence covers only the phrases in the draft**, so `evidence-count` describes what
+  the reviewer is reading.
+- **§13 step 5 is only half built. Deferred for the MVP: batch run safety rule 2 (§5),
+  never re-propose a previously rejected value.** `aggregate.drop_current` drops
+  proposals that match the child's current profile value, which the run reads anyway.
+  Checking rejected values needs one more Podio query per run, to `Suggested Profile
+  Updates` for this child's `status = rejected` items. It is skipped for now. Until it's
+  built, a rejected value can come back on the next run. When built: filter the query to
+  the one child in the run, key the result by target field only, and hold it in memory
+  for that run, like the profile values (§5, no local persistence).
+
+### Next: build order step 8 (§13) — `podio/write.py`. It needs the stage 1 read path (`client.py`, `schema.py`, `read.py`) before it can run end to end.
