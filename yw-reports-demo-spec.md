@@ -581,8 +581,7 @@ the live API rather than guessing:**
 
 ### Architecture pivot (2026-08-20)
 
-Decided to drop the local web app entirely. Review now happens inside Podio itself, via a
-new `Suggested Profile Updates` app, rather than in a local review screen. The local
+Review happens inside Podio itself, via a new `Suggested Profile Updates` app, rather than in a local review screen. The local
 machine runs a stateless script only (read from Podio → extract → aggregate per
 child/field → write proposals to the new app); nothing is persisted or cached locally at
 all, superseding the 2026-08-17 in-memory-SQLite-only decision. Sections 5–8 above have
