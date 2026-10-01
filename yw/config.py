@@ -9,7 +9,7 @@ MODEL_NAME to compare candidates; the eval harness loops over candidates,
 deployment pins one.
 """
 
-MODEL_NAME = "llama3.1:8b"
+MODEL_NAME = "llama3.1-8b-cpu"
 
 # Ollama's own OpenAI-compatible endpoint (spec §13). Never anything else.
 BASE_URL = "http://localhost:11434/v1"
