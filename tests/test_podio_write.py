@@ -14,7 +14,6 @@ from yw.podio.write import (
 
 APP_ID = 30822495
 CHILD = 3352054230
-RUN_DATE = date(2026, 9, 30)
 
 TARGET_OPTIONS = {"presentation": 1, "boundaries": 2, "triggers": 3, "projects-and-activities": 4}
 STATUS_OPTIONS = {"proposed": 11, "accepted": 12, "edited": 13, "rejected": 14}
@@ -110,9 +109,9 @@ def test_deleted_proposed_option_is_refused():
 
 
 def test_fields_in_podio_write_shape():
-    fields = build_fields(proposal(), APP, RUN_DATE)
+    fields = build_fields(proposal(), APP)
 
-    assert fields["title"] == "triggers — 2 of 10 sessions — 2026-09-30"
+    assert "title" not in fields  # the app has no title field
     assert fields["child"] == [CHILD]
     assert fields["target-field"] == TARGET_OPTIONS["triggers"]
     assert fields["evidence-count"] == 2
@@ -122,17 +121,17 @@ def test_fields_in_podio_write_shape():
 
 
 def test_status_is_always_proposed():
-    assert build_fields(proposal(), APP, RUN_DATE)["status"] == STATUS_OPTIONS["proposed"]
+    assert build_fields(proposal(), APP)["status"] == STATUS_OPTIONS["proposed"]
 
 
 def test_reviewer_fields_are_left_empty():
-    fields = build_fields(proposal(), APP, RUN_DATE)
+    fields = build_fields(proposal(), APP)
     for name in ("final-value", "reviewed-by", "reviewed-at", "review-duration"):
         assert name not in fields
 
 
 def test_evidence_quotes_one_paragraph_each_and_escaped():
-    quotes = build_fields(proposal(), APP, RUN_DATE)["evidence-quotes"]
+    quotes = build_fields(proposal(), APP)["evidence-quotes"]
     assert quotes == (
         '<p>2026-08-07 — "threw the compass down"</p>'
         '<p>2026-08-14 — "stopped &amp; walked off"</p>'
@@ -140,14 +139,14 @@ def test_evidence_quotes_one_paragraph_each_and_escaped():
 
 
 def test_proposed_value_is_escaped():
-    fields = build_fields(proposal(proposed_value="calm <mostly>"), APP, RUN_DATE)
+    fields = build_fields(proposal(proposed_value="calm <mostly>"), APP)
     assert fields["proposed-value"] == "calm &lt;mostly&gt;"
 
 
 def test_create_proposal_posts_one_item_and_returns_its_id():
     client = FakeClient(post_response={"item_id": 555})
 
-    assert create_proposal(client, APP, proposal(), RUN_DATE) == 555
+    assert create_proposal(client, APP, proposal()) == 555
     [(method, path, body)] = client.calls
     assert (method, path) == ("POST", f"/item/app/{APP_ID}/")
-    assert body == {"fields": build_fields(proposal(), APP, RUN_DATE)}
+    assert body == {"fields": build_fields(proposal(), APP)}

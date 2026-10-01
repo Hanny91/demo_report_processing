@@ -21,19 +21,17 @@ Large text fields hold HTML in Podio. Values are escaped, and each quote
 goes in its own paragraph, so a "<" or "&" in a report can't change the
 markup.
 
-MVP: the title names the field, the session count and the run date, not the
-child. The `child` relationship shows the name in Podio, and fetching it
-would cost another call.
+MVP: no title is written. The app has no `title` field, so Podio titles each
+item from its first text field, `proposed-value`. `evidence-count` holds the
+n of "n of m sessions"; m (sessions considered) isn't written anywhere yet.
 """
 
 import html
 from dataclasses import dataclass
-from datetime import date
 
 from yw.models import Proposal, TargetField
 from yw.podio.client import PodioClient
 
-TITLE = "title"
 CHILD = "child"
 TARGET_FIELD = "target-field"
 EVIDENCE_COUNT = "evidence-count"
@@ -90,16 +88,15 @@ def load_proposals_app(client: PodioClient, app_id: int) -> ProposalsApp:
     return ProposalsApp(app_id=app_id, target_field_options=target_options, status_options=status_options)
 
 
-def create_proposal(client: PodioClient, app: ProposalsApp, proposal: Proposal, run_date: date) -> int:
+def create_proposal(client: PodioClient, app: ProposalsApp, proposal: Proposal) -> int:
     """Create one proposal item. Returns its item_id."""
-    response = client.post(f"/item/app/{app.app_id}/", {"fields": build_fields(proposal, app, run_date)})
+    response = client.post(f"/item/app/{app.app_id}/", {"fields": build_fields(proposal, app)})
     return response["item_id"]
 
 
-def build_fields(proposal: Proposal, app: ProposalsApp, run_date: date) -> dict:
+def build_fields(proposal: Proposal, app: ProposalsApp) -> dict:
     """The item's field values, keyed by external_id, in Podio's write shape."""
     return {
-        TITLE: title(proposal, run_date),
         CHILD: [proposal.child_id],
         TARGET_FIELD: app.target_field_options[proposal.field.value],
         EVIDENCE_COUNT: proposal.evidence_count,
@@ -110,14 +107,6 @@ def build_fields(proposal: Proposal, app: ProposalsApp, run_date: date) -> dict:
         MODEL_VERSION: proposal.model_version,
         PROMPT_VERSION: proposal.prompt_version,
     }
-
-
-def title(proposal: Proposal, run_date: date) -> str:
-    """e.g. "presentation — 9 of 45 sessions — 2026-09-30". Carries the "of N" that evidence-count can't."""
-    return (
-        f"{proposal.field.value} — {proposal.evidence_count} of "
-        f"{proposal.sessions_considered} sessions — {run_date.isoformat()}"
-    )
 
 
 def evidence_quotes_html(proposal: Proposal) -> str:

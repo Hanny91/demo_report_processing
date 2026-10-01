@@ -182,7 +182,9 @@ Two rules the write path must enforce, both about not trampling the review proce
 There is no local data model. The only persisted state is the Podio app `Suggested
 Profile Updates`, additive only (no existing report or profile app/field is modified):
 
-- `title` — text — set by the script, e.g. "Damian — presentation — 2026-08-20"
+- `title` — text — set by the script, e.g. "Damian — presentation — 2026-08-20". **Not
+  built for the MVP** (progress log, 2026-09-30 entry): Podio titles items from
+  `proposed-value` instead.
 - `child` — relationship → Child Profile app
 - `target-field` — category, single-select — which profile field this proposes a value for. Closed list: `presentation`, `boundaries`, `triggers`, `projects-and-activities`.
 
@@ -793,9 +795,11 @@ no parallel model calls, no `schema.py` (§13 layout note).
 - `--save` added as a sandbox-only exception to §5 (see there). `--from-saved FILE
   --write` uploads a saved run without model calls, and each created `item_id` is
   written back to the file so a re-upload after a failure skips those.
-- Titles read `<field> — <n> of <m> sessions — <run date>`. `evidence-count` is a number
-  field, so the "of m" lives in the title. The child's name is left out: the `child`
-  relationship shows it, and fetching it costs a call.
+- **No `title` is written (MVP).** `setup_podio_app.py` never created the §6 `title`
+  field, and writing to it was the first upload's `400 invalid_value` (2026-10-01).
+  Rather than add the field, the title was dropped: Podio titles each item from its
+  first text field, `proposed-value`. Cost: the "of m" in "n of m sessions" (§3) isn't
+  shown anywhere, since `evidence-count` holds only n. Revisit if reviewers miss it.
 - New env var `PODIO_PROPOSALS_APP_ID` (`.env.example`).
 
 ### Next: first end-to-end run for Damian — `python -m yw.run --child 3352054230 --save --write`. Then check the created items in Podio against the unverified points above.
