@@ -1,6 +1,7 @@
 """
 The only function in this codebase that calls a model (spec §13). Every
-other module is plain data transformation.
+other module is plain data transformation. check_ready() only lists
+installed models, it doesn't call one.
 
 Talks to Ollama's own OpenAI-compatible endpoint (spec §2 constraint 1:
 local models only, everywhere — llm.py never points at a cloud endpoint, in
@@ -34,6 +35,24 @@ class LLMError(RuntimeError):
     """
 
 
+def check_ready() -> None:
+    """
+    Check Ollama is reachable and has MODEL_NAME, without calling the model:
+    GET /models only lists what's installed. Raises LLMError saying what to
+    fix, so a long run fails at the start rather than on every call.
+    """
+    try:
+        with urllib.request.urlopen(f"{BASE_URL}/models", timeout=10) as response:
+            data = json.load(response)
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise LLMError(f"Ollama isn't reachable at {BASE_URL} ({exc}); start it and retry") from exc
+
+    installed = {m.get("id") for m in data.get("data", []) if isinstance(m, dict)}
+    # Ollama treats an untagged name as ":latest", and lists it that way.
+    if MODEL_NAME not in installed and f"{MODEL_NAME}:latest" not in installed:
+        raise LLMError(f"model {MODEL_NAME!r} isn't installed; run: ollama pull {MODEL_NAME}")
+
+
 def complete(messages: list[dict[str, str]]) -> str:
     """
     Send `messages` (OpenAI chat-format) to the configured local model and
@@ -53,6 +72,10 @@ def complete(messages: list[dict[str, str]]) -> str:
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
             data = json.load(response)
+    except urllib.error.HTTPError as exc:
+        raise LLMError(
+            f"request to model {MODEL_NAME!r} failed: {exc.code} {_ollama_error(exc)}"
+        ) from None
     except (urllib.error.URLError, TimeoutError) as exc:
         raise LLMError(f"request to model {MODEL_NAME!r} failed: {exc}") from exc
 
@@ -65,3 +88,18 @@ def complete(messages: list[dict[str, str]]) -> str:
         raise LLMError("reply content was empty")
 
     return content
+
+
+def _ollama_error(exc: urllib.error.HTTPError) -> str:
+    """
+    Ollama's own reason for an error response, e.g. a model that couldn't
+    load. It describes the server or model, never the prompt. Capped anyway.
+    """
+    try:
+        error = json.loads(exc.read()).get("error", "")
+    except (ValueError, AttributeError, OSError):
+        return ""
+    # The /v1 endpoint nests it OpenAI-style: {"error": {"message": "..."}}.
+    if isinstance(error, dict):
+        error = error.get("message", "")
+    return error[:200] if isinstance(error, str) else ""
