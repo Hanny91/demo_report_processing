@@ -2,7 +2,7 @@
 One-time provisioning script: creates the 'Suggested Profile Updates' app in
 a Podio space via POST /app/, with every field defined in code — including
 external_ids — instead of clicking it together by hand in the UI. See
-yw-reports-demo-spec.md §6 for the field list this mirrors and the design
+project.md §6 for the field list this mirrors and the design
 rationale (originally a separate decision doc, since folded into the spec).
 
 Field order is the order Podio shows them in, and follows the reading order
@@ -161,14 +161,6 @@ def build_app_payload(profile_app_id: str, report_app_id: str) -> dict:
                     "label": "Reviewed at",
                     "external_id": "reviewed-at",
                     "settings": {"calendar": False},
-                },
-            },
-            {
-                "type": "number",
-                "config": {
-                    "label": "Review duration (seconds)",
-                    "external_id": "review-duration",
-                    "settings": {"decimals": 0},
                 },
             },
             {

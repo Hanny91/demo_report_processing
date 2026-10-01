@@ -1,6 +1,5 @@
 """
-Writing proposals into the Suggested Profile Updates app (build stage 4, spec
-§6, §8, §13 step 6). Additive only: this module creates items and never
+Writing proposals into the Suggested Profile Updates app. Additive only: this module creates items and never
 updates or deletes one. So batch run safety rule 1 (spec §5, never
 overwrite an item whose status isn't `proposed`) holds by construction.
 
@@ -14,8 +13,7 @@ the app is recreated. It runs before the model does, so a missing field
 stops the run in seconds, not after an hour of extraction.
 
 Written but never edited: `proposed-value` and `evidence-quotes` (spec §6).
-Left for the reviewer: `final-value`, `reviewed-by`, `reviewed-at`,
-`review-duration`.
+Left for the reviewer: `final-value`, `reviewed-by`, `reviewed-at`.
 
 Large text fields hold HTML in Podio. Values are escaped, and each quote
 goes in its own paragraph, so a "<" or "&" in a report can't change the

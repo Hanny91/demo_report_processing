@@ -126,7 +126,7 @@ def test_status_is_always_proposed():
 
 def test_reviewer_fields_are_left_empty():
     fields = build_fields(proposal(), APP)
-    for name in ("final-value", "reviewed-by", "reviewed-at", "review-duration"):
+    for name in ("final-value", "reviewed-by", "reviewed-at"):
         assert name not in fields
 
 

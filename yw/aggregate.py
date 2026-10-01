@@ -147,15 +147,14 @@ def drop_current(
     normalise_value, so a difference in case or a trailing full stop doesn't
     count as a new value.
 
-    A run covers one child (spec §4), so `current_values` is that child's
+    A run covers one child, so `current_values` is that child's
     profile, keyed by field; a missing field means the profile has nothing
     there. A proposal for any other child raises an error, so one child's
     profile can never be compared against another child's proposals.
 
     Not done yet (MVP): dropping values previously rejected for this child
     (spec §5 batch run safety rule 2). That needs another Podio query, to the
-    proposals app, for this child's `rejected` items. Deferred, see the spec
-    progress log.
+    proposals app, for this child's `rejected` items. Deferred, see spec §5.
     """
     kept = []
     for p in proposals:

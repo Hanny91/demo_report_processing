@@ -1,6 +1,5 @@
 """
-Reading a child's reports from Podio into Report objects for one run (build
-stage 1, spec §8, §13). Nothing is kept after the run (spec §5).
+Reading a child's reports from Podio into Report objects for one run (§13). Nothing is kept after the run (spec §5).
 
 One call per child: POST /item/app/{app_id}/filter/ on the reports app,
 filtered on the relationship field that points at the profile (spec §7).
@@ -10,8 +9,7 @@ fields, so it would need another call per report.
 
 Field readers live here and not in a separate schema.py. read.py is the only
 module that reads Podio fields for now; split them out once a second reader
-needs them. Shapes differ by field type, as stage 0 found (spec progress log,
-stage 0 point 4):
+needs them. Shapes differ by field type (spec §7):
 
     text   {"value": "..."}
     date   {"start_date": "2026-08-07", ...}           no "value" key
@@ -30,12 +28,12 @@ from datetime import date
 from yw.models import Report
 from yw.podio.client import PodioClient
 
-# Reports app field external_ids (sandbox, spec progress log stage 0 table).
+# Reports app field external_ids, as set up in the sandbox.
 REPORT_TEXT = "title"
 REPORT_DATE = "date-of-session"
 REPORT_PROFILE = "profile-2"
 
-# ~45 sessions per child per year (spec §4); 500 is Podio's maximum per page.
+#  500 is Podio's maximum per page.
 FILTER_LIMIT = 500
 
 

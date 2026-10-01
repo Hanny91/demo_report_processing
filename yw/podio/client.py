@@ -5,8 +5,8 @@ and one request wrapper that read.py and write.py go through.
 Uses only the standard library, like llm.py. The auth flow is the one stage 0
 tested against the live API (podio_api_work/podio_oauth_spike.py):
 authorization-code sign-in in the browser, then refresh tokens. The token
-exchange takes a JSON body, not a form-encoded one (spec progress log, stage
-0 point 1).
+exchange takes a JSON body, not a form-encoded one (project.md appendix,
+finding 1).
 
 The token cache (.podio_token_cache.json, gitignored) is the only thing this
 module writes to disk. It holds credentials, never report or profile content,
@@ -233,7 +233,7 @@ def _authorization_code(client_id: str, redirect_uri: str) -> str:
     """
     Browser sign-in: open Podio's authorize page and catch the redirect on
     a one-shot local server. The redirect host can be localtest.me, which
-    resolves to 127.0.0.1 (spec progress log, stage 0 point 6).
+    resolves to 127.0.0.1 (project.md appendix, finding 2).
     """
     parsed = urllib.parse.urlparse(redirect_uri)
     server = HTTPServer((parsed.hostname, parsed.port or 80), _CallbackHandler)
