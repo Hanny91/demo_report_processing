@@ -1,0 +1,69 @@
+# Mock reports with hand-written expected extractions (spec §13). Not real
+# data — every report here is invented for this file.
+#
+# Each case is one (report, field) pair, matching the real pipeline's one
+# model call per (report, target field). expected_quotes: [] is a valid,
+# expected answer — small models over-extract, and these cases are what
+# catch it (spec §13, §3).
+#
+# Expect to grow this file: every surprise in testing becomes a new case.
+
+- id: damian-compass-trigger
+  field: triggers
+  date: "2026-08-07"
+  report: |
+    Damian was in good spirits at the start of the session but struggled when the group moved on to the map-reading exercise. He threw the compass down and said "this is stupid" when he got the bearing wrong twice. He calmed down after a 5 minute break away from the group and rejoined for the fire lighting activity, where he successfully got a sustained flame going and was keen to show the younger kids how he did it.
+  expected_quotes:
+    - 'He threw the compass down and said "this is stupid" when he got the bearing wrong twice.'
+
+- id: priya-pond-dipping-no-trigger
+  field: triggers
+  date: "2026-08-08"
+  report: |
+    Priya arrived on time and joined the group for the pond-dipping session. She worked well with her partner, correctly identified three species of pond invertebrate using the ID sheet, and helped tidy away the nets at the end without being asked.
+  expected_quotes: []
+
+- id: jayden-transition-warning-boundary
+  field: boundaries
+  date: "2026-08-09"
+  report: |
+    The group moved into the woodland shelter for the afternoon activity, which involved several instructions given in quick succession. Jayden became visibly overwhelmed once the group leader started talking over the general noise of tool use. It helped when one instructor pulled him aside beforehand to say "in two minutes we are going to stop and move to the fire circle" rather than announcing the change to the whole group at once.
+  expected_quotes:
+    - 'It helped when one instructor pulled him aside beforehand to say "in two minutes we are going to stop and move to the fire circle" rather than announcing the change to the whole group at once.'
+
+- id: den-building-no-boundary
+  field: boundaries
+  date: "2026-08-10"
+  report: |
+    The group spent the session building a den using tarps and paracord. Everyone contributed ideas and the den was finished with time to spare for a game of capture the flag before pickup.
+  expected_quotes: []
+
+- id: aaliyah-mood-shift-presentation
+  field: presentation
+  date: "2026-08-11"
+  report: |
+    Aaliyah was quiet and withdrawn when she arrived, barely making eye contact during the morning briefing. By the afternoon she had brightened considerably, laughing with her group during the raft-building task and taking the lead on tying the final knots.
+  expected_quotes:
+    - 'Aaliyah was quiet and withdrawn when she arrived, barely making eye contact during the morning briefing.'
+
+- id: river-session-logistics-no-presentation
+  field: presentation
+  date: "2026-08-12"
+  report: |
+    Session ran from 10am to 2pm at the river site. Minibus departed on time and the group completed the planned river safety briefing before lunch. No incidents to report.
+  expected_quotes: []
+
+- id: damian-fire-lighting-activity
+  field: projects-and-activities
+  date: "2026-08-07"
+  report: |
+    Damian was in good spirits at the start of the session but struggled when the group moved on to the map-reading exercise. He threw the compass down and said "this is stupid" when he got the bearing wrong twice. He calmed down after a 5 minute break away from the group and rejoined for the fire lighting activity, where he successfully got a sustained flame going and was keen to show the younger kids how he did it.
+  expected_quotes:
+    - 'He calmed down after a 5 minute break away from the group and rejoined for the fire lighting activity, where he successfully got a sustained flame going and was keen to show the younger kids how he did it.'
+
+- id: ben-one-to-one-no-activity
+  field: projects-and-activities
+  date: "2026-08-13"
+  report: |
+    Ben spent most of the session talking with two staff members about how his week had gone at home. He seemed glad to have the one-to-one time and asked if he could do the same again next week.
+  expected_quotes: []

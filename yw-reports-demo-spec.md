@@ -1,6 +1,6 @@
 # YW_reports — Demo Build Spec
 
-**Status:** stage 0 complete (OAuth spike + seed data); architecture pivoted 2026-08-20 to Podio-native review; `Suggested Profile Updates` app (app_id `30822495`) provisioned 2026-08-20; decisions addendum folded in 2026-09-18 — see [Progress log](#progress-log) at the end
+**Status:** stage 0 complete (OAuth spike + seed data); architecture pivoted 2026-08-20 to Podio-native review; decisions addendum folded in 2026-09-18; stages 1–4 built and run end to end on mock data 2026-10-01 (MVP scope), into `Suggested Profile Updates` app_id `30843935` (recreated from `setup_podio_app.py`) — see [Progress log](#progress-log) at the end
 **Goal:** a demonstrable prototype on mock data, used to support funding applications
 **Explicitly out of scope:** real data, production deployment, DPIA, hardware purchase, a local review UI, grammar/spelling assistance, and any post-processing of what an instructor writes (see §1)
 
@@ -45,7 +45,7 @@ These are design constraints, not preferences. They exist because the production
 1. **All processing local.** No report text is sent to any external API. The language model runs on the machine. Embeddings, if used at all, run locally.
 2. **Never auto-write.** The model only ever proposes, into the `Suggested Profile Updates` app. A human accepts, edits or rejects *inside Podio*, under their own login — that action, not the script's write, is what Podio's revision history attributes to them. The script itself writes as the coordinator running the batch, and only ever to the new app, never to `Child Profile` directly.
 3. **Every proposal cites its source.** A proposal with no verifiable source sentence is discarded, not shown. This is enforced structurally: `source-reports` is a non-null relationship field, and (during extraction) the source reference is a non-null foreign key before it's ever aggregated into a proposal.
-4. **No permission escalation.** A worker must never see, via this tool, anything they could not see in Podio directly. Review happening inside Podio itself makes this constraint largely self-enforcing rather than something the app must separately guarantee.
+4. **No permission escalation.** A worker must never see, via this tool, anything they could not see in Podio directly. Review happening inside Podio itself makes this constraint largely self-enforcing rather than something the app must separately guarantee. The one place report text is *copied* rather than linked is `evidence-quotes` (§6), which Podio's permissions on the source report don't follow. That is acceptable under this organisation's access model: every worker can see every daily report, because anyone may work with any child; only incident records are restricted per user, and those are never extraction sources or targets (§6 exclusion rule). If a deployment restricts daily reports per user, `evidence-quotes` must be revisited.
 
 Constraints 3 and 4 can be relaxed for the demo only in the sense that mock data carries no real risk — but the mechanisms must be built and demonstrable, because they are the point.
 
@@ -111,9 +111,15 @@ runs, nothing cached locally between runs at all: re-run against Podio each time
 track processed-report IDs *in Podio* (not locally) if avoiding recomputation matters
 later. Never log field values or report text — IDs only, if logging at all.
 
-The single exception is the development-only response cache in the eval harness (§13):
-mock data only, off by default, and it cannot be enabled from `run.py`. It never touches
-anything read from Podio.
+There are two exceptions, both for development only:
+
+- The response cache in the eval harness (§13): mock data only, off by default, and it
+  cannot be enabled from `run.py`. It never touches anything read from Podio.
+- **Sandbox only:** `run.py --save` writes a run's proposals, including their verified
+  quotes, to `runs/` (gitignored), so a long extraction run isn't lost to a failed
+  upload (progress log, 2026-09-30). It is off by default and holds report text, so it
+  must never be used against real data. Remove it, or take it out of scope, before
+  anything here touches a real org.
 
 Batching is per child, ahead of that child's review meeting, an instructor's supervision or someone providing cover on a short notice, not an org-wide sweep on a
 schedule — confirm actual review cadence with coordinators before hardcoding a trigger.
@@ -134,6 +140,8 @@ query surface for them.
 ### Quote verification
 
 Models paraphrase when asked to quote. The model returns what it believes is the source sentence; the script then string-matches that back into the report text to compute character offsets. **No exact match means the extraction is rejected**, before it's ever eligible for aggregation. This is the primary defence against fabricated observations and it is cheap.
+
+"Exact" allows for typography only: dash variants, curly vs straight quote marks, "…" vs "...", and runs of whitespace count as equal, because a model retyping "—" as "-" hasn't changed what the report says. Case, punctuation and every word must still match; there is no fuzzy matching. The quote that is kept is always sliced from the original report, never the model's version, so the evidence a reviewer sees (`evidence-quotes`, §6) is character-for-character what the instructor wrote.
 
 ### Aggregation, not per-sentence proposals
 
@@ -166,14 +174,17 @@ Two rules the write path must enforce, both about not trampling the review proce
 2. **Never re-propose a previously rejected value.** Repeating the same rejected
    suggestion each term is the fastest way to make reviewers stop reading. Track rejected
    values per (child, target-field) — read them back out of the proposals app at the start
-   of a run, since there's no local state to hold them.
+   of a run, since there's no local state to hold them. **Deferred for the MVP** (progress
+   log, 2026-09-30): this costs an extra Podio query per run and isn't built yet.
 
 ## 6. Data model (sketch)
 
 There is no local data model. The only persisted state is the Podio app `Suggested
 Profile Updates`, additive only (no existing report or profile app/field is modified):
 
-- `title` — text — set by the script, e.g. "Damian — presentation — 2026-08-20"
+- `title` — text — set by the script, e.g. "Damian — presentation — 2026-08-20". **Not
+  built for the MVP** (progress log, 2026-09-30 entry): Podio titles items from
+  `proposed-value` instead.
 - `child` — relationship → Child Profile app
 - `target-field` — category, single-select — which profile field this proposes a value for. Closed list: `presentation`, `boundaries`, `triggers`, `projects-and-activities`.
 
@@ -188,10 +199,11 @@ Profile Updates`, additive only (no existing report or profile app/field is modi
   such a thing exist on this or a future profile app — the distinction is "ordinary
   profile field populated from routine observation" vs. "record of an incident or formal
   risk decision," not the field's name alone.
+- `evidence-count` — number — e.g. "9 of 45 sessions". The first thing the reviewer should read (§3).
 - `proposed-value` — text (multi-line) — **written by the script and never edited by anyone.** Keep it short (§1): two lines that invite an edit, not a paragraph polished enough to wave through.
 - `final-value` — text (multi-line) — the instructor's text, where they changed something. Blank means "same as proposed". Without this field the proposed-versus-final delta is lost and edit quality can't be measured; Podio's field-level revision history does record the change, but it isn't queryable in aggregate, so it is not a substitute.
-- `source-reports` — relationship → Daily Report app, **multiple**, required — every report this proposal is aggregated from. Podio caps this at 250 linked items — a non-issue, see §7.
-- `evidence-count` — number — e.g. "9 of 45 sessions". The first thing the reviewer should read (§3).
+- `evidence-quotes` — text (multi-line) — **written by the script and never edited by anyone.** The verified sentence behind each supporting extraction, one line each, dated: `2026-08-07 — "…"`. Sliced from the report's own text (§5, quote verification), so it is exactly what the instructor wrote. Placed next to `final-value` so the evidence sits beside the edit (§1), and after `evidence-count` so it supports the proposal rather than leading it (§3). Copying report text here is acceptable under constraint 4 (§2).
+- `source-reports` — relationship → Daily Report app, **multiple**, required — every report this proposal is aggregated from, for full context. Podio caps this at 250 linked items — a non-issue, see §7.
 - `status` — category, single-select — `proposed` / `accepted` / `edited` / `rejected`. **Set explicitly to `proposed` by the script on every item it creates, never left blank** — there is no field default, and trying to add one corrupts the field (progress log, stage 4 provisioning).
 - `reviewed-by` — contact
 - `reviewed-at` — date
@@ -215,8 +227,9 @@ one filtered app view. Concretely:
   this view is the entire "inbox." Full proposal history sits underneath it; the filter is
   what keeps the queue clean, never deletion (§7).
 - **Reviewing one item:** the instructor opens a proposal, reads `evidence-count` first,
-  then `proposed-value` beside `source-reports` (Podio renders the linked report items
-  inline, so the source text is one click away), and:
+  then `proposed-value` with the supporting sentences in `evidence-quotes` beside it.
+  `source-reports` is there for the full context (Podio renders the linked report items
+  inline, so each whole report is one click away). Then:
   - **Accept as-is** → change `status` to `accepted`, set `reviewed-by` (self) and
     `reviewed-at` (today). `final-value` stays blank, which is how "unchanged" is
     recorded. Nothing is copied by hand for the common case.
@@ -319,7 +332,7 @@ it starts on mock data, ahead of the stage 1 Podio read path.
 
 ## 9. Sandbox
 
-Free Podio tier: 100 items per org, 5 employees — a *sandbox* limit, not a design one. Paid plans allow unlimited items, so nothing in this design should be shaped by item volume (§7). Structure created by hand in the UI through stage 0; the `Suggested Profile Updates` app (stage 4) is now created by [setup_podio_app.py](podio%20api%20work/setup_podio_app.py) instead — see the progress log.
+Free Podio tier: 100 items per org, 5 employees — a *sandbox* limit, not a design one. Paid plans allow unlimited items, so nothing in this design should be shaped by item volume (§7). Structure created by hand in the UI through stage 0; the `Suggested Profile Updates` app (stage 4) is now created by [setup_podio_app.py](podio_api_work/setup_podio_app.py) instead — see the progress log.
 
 **Blocked (found 2026-08-20):** user management — adding a second test account to actually verify permission filtering — is not part of the free plan. The originally-planned "two test users in separate workspaces to verify permission filtering actually works" check can't be done in this sandbox without a paid upgrade. Deferred, not resolved — open question, not yet decided whether to pay for a temporary upgrade, skip the check and trust Podio's own permission system (it isn't something this project builds), or defer verification to the real org's paid account later. Revisit before treating the review workflow as demo-complete.
 
@@ -396,7 +409,9 @@ eval/
 ```
 
 `client.py` and `schema.py` carry over what stage 0 established (§7, progress log): JSON
-token exchange, `item_id` vs `app_item_id`, and per-`type` field shapes.
+token exchange, `item_id` vs `app_item_id`, and per-`type` field shapes. For the MVP,
+`schema.py` is folded into `read.py` (field readers) and `write.py` (external_ids): each
+has one user. Split it out once a second module reads the same field types.
 
 ### Step sequence
 
@@ -408,8 +423,9 @@ token exchange, `item_id` vs `app_item_id`, and per-`type` field shapes.
    - `verify.verify_quote(raw, report.text)` — discard on failure
 3. Collect surviving extractions.
 4. `aggregate.group(extractions)` → one `Proposal` per (child, target-field).
-5. Filter: drop proposals matching the current profile value, and drop any value
-   previously rejected for that (child, field) (§5, batch run safety rules).
+5. Filter: drop proposals matching the current profile value (`aggregate.drop_current`),
+   and drop any value previously rejected for that (child, field) (§5, batch run safety
+   rules — the rejected-value part is deferred for the MVP, see progress log 2026-09-30).
 6. `write.create_proposal(...)` for each survivor, with `status: proposed` set explicitly
    (§6).
 
@@ -429,7 +445,8 @@ token exchange, `item_id` vs `app_item_id`, and per-`type` field shapes.
 ### `verify.py` is the choke point
 
 No exact string match of the quoted sentence into the source report text → the extraction
-is discarded. Not flagged, not lowered in confidence. Discarded.
+is discarded. Not flagged, not lowered in confidence. Discarded. Only typography is
+forgiven (§5, quote verification); the kept quote is the report's own text.
 
 This is the guarantee the entire provenance design rests on (§2 constraint 3, §5 quote
 verification). It is roughly twenty lines and it is the primary defence against
@@ -532,7 +549,7 @@ framework, no DB, credentials from `.env` — see `.env.example`):
 | `reports` app | app_id `30816198` — fields: `title` (text, the report body), `date-of-session` (date), `profile-2` (app/relationship → profile) |
 | `profile` app | app_id `30816226` — fields: `title` (text, name), `date-of-birth` (date) |
 | Damian's profile item | item_id `3352054230` (app_item_id `1` — do not confuse the two, see below) |
-| `Suggested Profile Updates` app | app_id `30822495` — created via `setup_podio_app.py`, fields per spec §6. See [Stage 4 provisioning (2026-08-20)](#stage-4-provisioning-2026-08-20) below. |
+| `Suggested Profile Updates` app | app_id `30843935` — recreated via `setup_podio_app.py` with the full §6 field list except `title` (see [First end-to-end run](#first-end-to-end-run-2026-09-30-to-2026-10-01)). Replaces `30822495`, the 2026-08-20 original, which lacked three fields. |
 
 **Things the docs got wrong or left ambiguous, resolved by testing against
 the live API rather than guessing:**
@@ -576,8 +593,7 @@ the live API rather than guessing:**
 
 ### Architecture pivot (2026-08-20)
 
-Decided to drop the local web app entirely. Review now happens inside Podio itself, via a
-new `Suggested Profile Updates` app, rather than in a local review screen. The local
+Review happens inside Podio itself, via a new `Suggested Profile Updates` app, rather than in a local review screen. The local
 machine runs a stateless script only (read from Podio → extract → aggregate per
 child/field → write proposals to the new app); nothing is persisted or cached locally at
 all, superseding the 2026-08-17 in-memory-SQLite-only decision. Sections 5–8 above have
@@ -593,7 +609,7 @@ entries. `podio-review-app-decision.md` didn't survive the move as a separate fi
 content was folded entirely into this spec (see the architecture pivot entry above and
 §5–§8) — links to it elsewhere in this doc now point at sections here instead.
 
-Wrote [setup_podio_app.py](podio%20api%20work/setup_podio_app.py) to create the
+Wrote [setup_podio_app.py](podio_api_work/setup_podio_app.py) to create the
 `Suggested Profile Updates` app (§6 schema) via `POST /app/` instead of clicking it
 together by hand — the point being that an admin on the real org's Podio account can run
 one command later instead of re-deriving field types and external_ids from this doc.
@@ -700,4 +716,147 @@ folding it in, where it conflicted with the spec:
 Also: §12's deferred "evaluation" is clarified as manager-facing outcome reporting, not
 the extraction eval harness, which is part of the build.
 
-### Next: build order step 1–2 (§13) — `models.py`, then `verify.py` and its tests, on mock data. The stage 1 Podio read path follows before `podio/write.py`.
+### Build steps 1–3 and evidence quotes (2026-09-18)
+
+`yw/models.py`, `yw/extract/verify.py` and `yw/extract/parse.py` written, with tests
+(`tests/`, run with `python -m pytest`). Two decisions came out of it:
+
+- **Quote verification forgives typography, nothing else.** Most seed reports use em
+  dashes, and a model retyping "—" as "-" was losing correct extractions for no gain.
+  Dashes, curly/straight quote marks, ellipses and whitespace now count as equal; case,
+  punctuation and wording still must match exactly. The kept quote is always the report's
+  own text. (§5, §13)
+- **Proposals now show the quotes, not just links.** Verified quotes were being dropped at
+  aggregation, so a reviewer had only `source-reports` and had to reread whole reports to
+  find the supporting sentence, despite §1 promising every proposal is traceable to "the
+  exact sentence it came from". New field `evidence-quotes` (§6). Copying report text is
+  acceptable because every worker can already see every daily report; only incident
+  records are restricted per user, and those are never sources (§2 constraint 4).
+
+While adding the field, `setup_podio_app.py` turned out to still have the pre-addendum
+schema: `final-value`, `review-duration` and `prompt-version` were missing, so app
+`30822495` lacked them too. The script now creates all 13 §6 fields, ordered for the
+§3 reading order (evidence count before the proposed value, quotes next to the edit
+field). App `30822495` is to be deleted and recreated from the script; the app_id in the
+status line and sandbox table must be updated once that's done.
+
+### Build step 7: `aggregate.py` (2026-09-30)
+
+`yw/aggregate.py` written, with tests (`tests/test_aggregate.py`). `llm.py`, `prompt.py`
+and the eval harness (steps 4–6) were done earlier the same day. Decisions:
+
+- **No model call in aggregation.** The proposed value is built from the extracted
+  values: values that differ only in case, whitespace or trailing punctuation count as
+  one phrase, phrases are ranked by supporting sessions then recency, and the top 3 are
+  joined. Every phrase in a draft is therefore a model-extracted value backed by a
+  verified quote (§2 constraint 3), in the reports' own wording (§5 voice). A
+  model-written summary would add text no quote supports. Known weakness: free-text
+  values rarely repeat word for word, so ranking mostly falls back to recency. That is
+  the §3 case for category fields.
+- **Evidence covers only the phrases in the draft**, so `evidence-count` describes what
+  the reviewer is reading.
+- **§13 step 5 is only half built. Deferred for the MVP: batch run safety rule 2 (§5),
+  never re-propose a previously rejected value.** `aggregate.drop_current` drops
+  proposals that match the child's current profile value, which the run reads anyway.
+  Checking rejected values needs one more Podio query per run, to `Suggested Profile
+  Updates` for this child's `status = rejected` items. It is skipped for now. Until it's
+  built, a rejected value can come back on the next run. When built: filter the query to
+  the one child in the run, key the result by target field only, and hold it in memory
+  for that run, like the profile values (§5, no local persistence).
+
+### Stage 1 read path, `write.py` and `run.py` (2026-09-30)
+
+`yw/podio/client.py`, `read.py` and `write.py` and `yw/run.py` written, with tests.
+Standard library only, like `llm.py`; `httpx` and `python-dotenv` are left to the
+`podio_api_work/` scripts. MVP scope as agreed: no rate limiting, no retries, no paging,
+no parallel model calls, no `schema.py` (§13 layout note).
+
+**Verified against the live API** (same approach as the stage 0 and stage 4 lists):
+
+1. **`POST /item/app/{app_id}/filter/` filters on a relationship field by external_id:**
+   `{"filters": {"profile-2": [child_item_id]}}`. `read.py` also checks every returned
+   report links to the child, so an ignored filter would stop the run rather than mix
+   children.
+2. **The filter response includes every item's full fields**, so one call per child
+   reads all their reports. The §7 `/reference/` route would need another call per
+   report.
+
+**Not yet verified, to check on the first `--write`:**
+
+- Category fields written as option ids (looked up from `GET /app/{app_id}` by option
+  text, so nothing hard-codes ids that change when the app is recreated).
+- Large text fields take HTML: `evidence-quotes` is one `<p>` per quote, escaped.
+
+**Decisions:**
+
+- `run.py` is a dry run unless given `--write`. With `--write`, it checks the proposals
+  app has every field and option it writes *before* the model runs, so an app that
+  wasn't recreated fails in seconds rather than after an hour.
+- `--save` added as a sandbox-only exception to §5 (see there). `--from-saved FILE
+  --write` uploads a saved run without model calls, and each created `item_id` is
+  written back to the file so a re-upload after a failure skips those.
+- **No `title` is written (MVP).** `setup_podio_app.py` never created the §6 `title`
+  field, and writing to it was the first upload's `400 invalid_value` (2026-10-01).
+  Rather than add the field, the title was dropped: Podio titles each item from its
+  first text field, `proposed-value`. Cost: the "of m" in "n of m sessions" (§3) isn't
+  shown anywhere, since `evidence-count` holds only n. Revisit if reviewers miss it.
+- New env var `PODIO_PROPOSALS_APP_ID` (`.env.example`).
+
+### First end-to-end run (2026-09-30 to 2026-10-01)
+
+Damian's 12 reports, run through read → extract → aggregate → write. It worked on the
+fourth attempt. The first three failed on the local machine, not on the design.
+
+**What went wrong, in order:**
+
+1. **Ollama wasn't running.** All 48 model calls failed, but the run swallowed the
+   reason and reported only counts. Fixed in `run.py` and `llm.py`:
+   - `llm.check_ready()` checks Ollama is up and has the model before the first call
+     (listing models only, never calling one).
+   - Every call is logged to the console and to `runs/<child>-<timestamp>.log`, with
+     ids, timings and error reasons only. Ollama's reason for an error response is now
+     included; it describes the server, never the prompt.
+   - Three model failures in a row stop extraction. Reports already finished are
+     kept; the one in progress is dropped, so "n of m sessions" counts only fully
+     processed reports.
+2. **Ollama crashed on every real prompt** (`exit status 0xc0000005`, an access
+   violation), with both `llama3.1:8b` and `llama3.2:3b`. The cause is the laptop's
+   NVIDIA 940MX (2 GB). Ollama 0.35 detects it, puts a couple of model layers on it, and
+   the process crashes. A tiny prompt ("say ok") gets through; a report-sized one
+   doesn't. First misdiagnosed as low memory (7.8 GB RAM, ~3 GB free). The 3B model
+   crashing the same way ruled that out.
+   - `CUDA_VISIBLE_DEVICES=-1` doesn't help: Ollama overrides it.
+   - What works: a CPU-only copy of the model, built from `Modelfile-cpu`
+     (`PARAMETER num_gpu 0`) with `ollama create llama3.1-8b-cpu -f Modelfile-cpu`.
+     `config.py` now names that model, so it's what `model-version` records.
+   - For §10: the 8B model runs on this laptop only on the CPU. That is evidence for
+     the hardware line in a funding application, not just an inconvenience.
+3. **The upload failed with `400 invalid_value`**, after extraction had finished. The
+   cause was writing a `title` field the app doesn't have. The title was dropped, see
+   the entry above. `--save` meant the model didn't need to run again.
+
+**What worked:**
+
+- **Full run:** 12 reports, 48 model calls, about 37 minutes on the CPU (around 45 s
+  per call), 4 proposals with `sessions_considered: 12`. Saved with `--save`, to be
+  uploaded with `--from-saved` (`runs/3352054230-20260930-232407.json`).
+- **One-report check:** `--max-reports N` was added to `run.py` for quick end-to-end
+  checks. A one-report run created 4 items. Those are test items with a one-session
+  denominator; delete them by hand.
+- **Podio accepted both previously unverified write shapes** (entry above): category
+  fields written as option ids, and `evidence-quotes` as HTML paragraphs. Whether they
+  *display* correctly in the item view still needs a look.
+
+**Found, not yet acted on:**
+
+- **Podio's rate-limit header reported 248 calls left after a run of a handful of
+  calls.** That suggests 250 per hour on this account, not the 1,000 in §7. It doesn't
+  bind at one run per child (~8 Podio calls), but §7 should be checked before it's
+  relied on.
+- **Aggregation quality.** At most one proposal per (child, field), so 4 for a full
+  run, by design (§5). Inside each, phrases are grouped only when the model's values
+  match almost word for word (`aggregate.py`), so evidence counts are expected to be
+  low. Judge on these real items before changing anything (the §3 category-field
+  question, or a merging step).
+
+### Next: review the uploaded items in Podio — display of `evidence-quotes` and category fields, and whether the drafts tell an instructor anything new (§1 demo test). Then documentation.

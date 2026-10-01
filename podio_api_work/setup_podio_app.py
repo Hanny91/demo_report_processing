@@ -2,8 +2,12 @@
 One-time provisioning script: creates the 'Suggested Profile Updates' app in
 a Podio space via POST /app/, with every field defined in code — including
 external_ids — instead of clicking it together by hand in the UI. See
-yw-reports-demo-spec.md §5 for the field list this mirrors and the design
+project.md §6 for the field list this mirrors and the design
 rationale (originally a separate decision doc, since folded into the spec).
+
+Field order is the order Podio shows them in, and follows the reading order
+in spec §3/§6: evidence count before the proposed value, and the supporting
+quotes next to the field the instructor edits.
 
 Podio's app-creation endpoint isn't verified against live behavior yet the
 way the OAuth/item endpoints in podio_oauth_spike.py and seed_reports.py
@@ -89,10 +93,34 @@ def build_app_payload(profile_app_id: str, report_app_id: str) -> dict:
                 },
             },
             {
+                "type": "number",
+                "config": {
+                    "label": "Evidence count",
+                    "external_id": "evidence-count",
+                    "settings": {"decimals": 0},
+                },
+            },
+            {
                 "type": "text",
                 "config": {
                     "label": "Proposed value",
                     "external_id": "proposed-value",
+                    "settings": {"size": "large"},
+                },
+            },
+            {
+                "type": "text",
+                "config": {
+                    "label": "Final value",
+                    "external_id": "final-value",
+                    "settings": {"size": "large"},
+                },
+            },
+            {
+                "type": "text",
+                "config": {
+                    "label": "Evidence quotes",
+                    "external_id": "evidence-quotes",
                     "settings": {"size": "large"},
                 },
             },
@@ -105,14 +133,6 @@ def build_app_payload(profile_app_id: str, report_app_id: str) -> dict:
                         "referenced_apps": [{"app_id": int(report_app_id)}],
                         "multiple": True,
                     },
-                },
-            },
-            {
-                "type": "number",
-                "config": {
-                    "label": "Evidence count",
-                    "external_id": "evidence-count",
-                    "settings": {"decimals": 0},
                 },
             },
             {
@@ -148,6 +168,14 @@ def build_app_payload(profile_app_id: str, report_app_id: str) -> dict:
                 "config": {
                     "label": "Model version",
                     "external_id": "model-version",
+                    "settings": {"size": "small"},
+                },
+            },
+            {
+                "type": "text",
+                "config": {
+                    "label": "Prompt version",
+                    "external_id": "prompt-version",
                     "settings": {"size": "small"},
                 },
             },
