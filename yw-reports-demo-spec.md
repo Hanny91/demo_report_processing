@@ -1,6 +1,6 @@
 # YW_reports — Demo Build Spec
 
-**Status:** stage 0 complete (OAuth spike + seed data); architecture pivoted 2026-08-20 to Podio-native review; `Suggested Profile Updates` app (app_id `30822495`) provisioned 2026-08-20; decisions addendum folded in 2026-09-18 — see [Progress log](#progress-log) at the end
+**Status:** stage 0 complete (OAuth spike + seed data); architecture pivoted 2026-08-20 to Podio-native review; decisions addendum folded in 2026-09-18; stages 1–4 built and run end to end on mock data 2026-10-01 (MVP scope), into `Suggested Profile Updates` app_id `30843935` (recreated from `setup_podio_app.py`) — see [Progress log](#progress-log) at the end
 **Goal:** a demonstrable prototype on mock data, used to support funding applications
 **Explicitly out of scope:** real data, production deployment, DPIA, hardware purchase, a local review UI, grammar/spelling assistance, and any post-processing of what an instructor writes (see §1)
 
@@ -549,7 +549,7 @@ framework, no DB, credentials from `.env` — see `.env.example`):
 | `reports` app | app_id `30816198` — fields: `title` (text, the report body), `date-of-session` (date), `profile-2` (app/relationship → profile) |
 | `profile` app | app_id `30816226` — fields: `title` (text, name), `date-of-birth` (date) |
 | Damian's profile item | item_id `3352054230` (app_item_id `1` — do not confuse the two, see below) |
-| `Suggested Profile Updates` app | app_id `30822495` — created via `setup_podio_app.py`, fields per spec §6. See [Stage 4 provisioning (2026-08-20)](#stage-4-provisioning-2026-08-20) below. |
+| `Suggested Profile Updates` app | app_id `30843935` — recreated via `setup_podio_app.py` with the full §6 field list except `title` (see [First end-to-end run](#first-end-to-end-run-2026-09-30-to-2026-10-01)). Replaces `30822495`, the 2026-08-20 original, which lacked three fields. |
 
 **Things the docs got wrong or left ambiguous, resolved by testing against
 the live API rather than guessing:**
@@ -802,4 +802,61 @@ no parallel model calls, no `schema.py` (§13 layout note).
   shown anywhere, since `evidence-count` holds only n. Revisit if reviewers miss it.
 - New env var `PODIO_PROPOSALS_APP_ID` (`.env.example`).
 
-### Next: first end-to-end run for Damian — `python -m yw.run --child 3352054230 --save --write`. Then check the created items in Podio against the unverified points above.
+### First end-to-end run (2026-09-30 to 2026-10-01)
+
+Damian's 12 reports, run through read → extract → aggregate → write. It worked on the
+fourth attempt. The first three failed on the local machine, not on the design.
+
+**What went wrong, in order:**
+
+1. **Ollama wasn't running.** All 48 model calls failed, but the run swallowed the
+   reason and reported only counts. Fixed in `run.py` and `llm.py`:
+   - `llm.check_ready()` checks Ollama is up and has the model before the first call
+     (listing models only, never calling one).
+   - Every call is logged to the console and to `runs/<child>-<timestamp>.log`, with
+     ids, timings and error reasons only. Ollama's reason for an error response is now
+     included; it describes the server, never the prompt.
+   - Three model failures in a row stop extraction. Reports already finished are
+     kept; the one in progress is dropped, so "n of m sessions" counts only fully
+     processed reports.
+2. **Ollama crashed on every real prompt** (`exit status 0xc0000005`, an access
+   violation), with both `llama3.1:8b` and `llama3.2:3b`. The cause is the laptop's
+   NVIDIA 940MX (2 GB). Ollama 0.35 detects it, puts a couple of model layers on it, and
+   the process crashes. A tiny prompt ("say ok") gets through; a report-sized one
+   doesn't. First misdiagnosed as low memory (7.8 GB RAM, ~3 GB free). The 3B model
+   crashing the same way ruled that out.
+   - `CUDA_VISIBLE_DEVICES=-1` doesn't help: Ollama overrides it.
+   - What works: a CPU-only copy of the model, built from `Modelfile-cpu`
+     (`PARAMETER num_gpu 0`) with `ollama create llama3.1-8b-cpu -f Modelfile-cpu`.
+     `config.py` now names that model, so it's what `model-version` records.
+   - For §10: the 8B model runs on this laptop only on the CPU. That is evidence for
+     the hardware line in a funding application, not just an inconvenience.
+3. **The upload failed with `400 invalid_value`**, after extraction had finished. The
+   cause was writing a `title` field the app doesn't have. The title was dropped, see
+   the entry above. `--save` meant the model didn't need to run again.
+
+**What worked:**
+
+- **Full run:** 12 reports, 48 model calls, about 37 minutes on the CPU (around 45 s
+  per call), 4 proposals with `sessions_considered: 12`. Saved with `--save`, to be
+  uploaded with `--from-saved` (`runs/3352054230-20260930-232407.json`).
+- **One-report check:** `--max-reports N` was added to `run.py` for quick end-to-end
+  checks. A one-report run created 4 items. Those are test items with a one-session
+  denominator; delete them by hand.
+- **Podio accepted both previously unverified write shapes** (entry above): category
+  fields written as option ids, and `evidence-quotes` as HTML paragraphs. Whether they
+  *display* correctly in the item view still needs a look.
+
+**Found, not yet acted on:**
+
+- **Podio's rate-limit header reported 248 calls left after a run of a handful of
+  calls.** That suggests 250 per hour on this account, not the 1,000 in §7. It doesn't
+  bind at one run per child (~8 Podio calls), but §7 should be checked before it's
+  relied on.
+- **Aggregation quality.** At most one proposal per (child, field), so 4 for a full
+  run, by design (§5). Inside each, phrases are grouped only when the model's values
+  match almost word for word (`aggregate.py`), so evidence counts are expected to be
+  low. Judge on these real items before changing anything (the §3 category-field
+  question, or a merging step).
+
+### Next: review the uploaded items in Podio — display of `evidence-quotes` and category fields, and whether the drafts tell an instructor anything new (§1 demo test). Then documentation.
